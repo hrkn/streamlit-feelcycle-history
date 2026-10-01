@@ -1,0 +1,9 @@
+name = "d1-local-server"
+main = "d1-local-server/main.py"
+compatibility_date = "2026-06-15"
+compatibility_flags = [ "python_workers", "disable_python_external_sdk" ]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "my-first-db"
+database_id = "8967ba49-3fcf-4254-bbf9-2796d5710f98"

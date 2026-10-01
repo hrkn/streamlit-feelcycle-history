@@ -1,0 +1,35 @@
+[project]
+name = "streamlit-feelcycle-history"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "feelpycle",
+    "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
+    "sqlalchemy>=2.0.50",
+    "streamlit>=1.58.0",
+    "streamlit-persist-session>=0.1.1",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+"streamlit_feelcycle" = ["assets/*"]
+
+[tool.pyright]
+extraPaths = ["src/streamlit_feelcycle"]
+
+[tool.uv.sources]
+feelpycle = { git = "git+ssh://git@github.com/hrkn/feelpycle.git" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.17",
+    "sqlalchemy-cloudflare-d1>=0.3.10",
+]

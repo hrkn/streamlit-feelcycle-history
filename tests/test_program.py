@@ -1,0 +1,31 @@
+import streamlit_feelcycle.program as program
+
+
+def test_colors_of() -> None:
+    # 各パターンの色判定テスト
+    assert program.colors_of("8th sp 1") == ("#000000", "#FFFFFF")
+    assert program.colors_of("9th sp 1") == ("#000000", "#FFFFFF")
+    assert program.colors_of("10th sp 1") == ("#000000", "#FFFFFF")
+    assert program.colors_of("april feel 2024") == ("#FF9933", "#000000")
+    assert program.colors_of("beercycle") == ("#7A3202", "#FFFFFF")
+    assert program.colors_of("feel deep 1") == ("#FFFFFF", "#000000")
+    assert program.colors_of("feel high 1") == ("#FFFFFF", "#000000")
+    assert program.colors_of("l 24 feel 1") == ("#00121C", "#3399FF")
+    assert program.colors_of("l 24 free 1") == ("#00121C", "#FF3333")
+    assert program.colors_of("l 25 btm 1") == ("#00121C", "#BD47DC")
+    assert program.colors_of("l 25 feel 1") == ("#00121C", "#3399FF")
+    assert program.colors_of("l 25 free 1") == ("#00121C", "#FF3333")
+    assert program.colors_of("live event") == ("#000000", "#c2a53e")
+    assert program.colors_of("bb1 comp 1") == ("#FFFF66", "#000000")
+    assert program.colors_of("bb2 mln 2") == ("#FF9933", "#000000")
+    assert program.colors_of("bb3 rock 1") == ("#FF3300", "#000000")
+    assert program.colors_of("bsbi comp 1") == ("#336699", "#FFFF66")
+    assert program.colors_of("bswi comp 1") == ("#990099", "#FFFF66")
+    assert program.colors_of("bsb hit 1") == ("#00CCFF", "#000000")
+    assert program.colors_of("bsw hit 8") == ("#CC66FF", "#FFFFFF")
+    assert program.colors_of("bsl hit 1") == ("#0000CC", "#FFFFFF")
+    assert program.colors_of("feel now g") == ("#B08A3A", "#FFFFFF")
+    assert program.colors_of("feel now b") == ("#00121C", "#FFFFFF")
+    assert program.colors_of("feel now s") == ("#666666", "#FFFFFF")
+    assert program.colors_of("skrillex") == ("#FFFFFF", "#000000")
+    assert program.colors_of("unknown program") == (None, None)
