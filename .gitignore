@@ -104,4 +104,6 @@ venv.bak/
 .logs/
 
 .wrangler
-.streamlit
+.streamlit/*
+!.streamlit/config.toml
+
