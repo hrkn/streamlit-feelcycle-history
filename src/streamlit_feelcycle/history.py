@@ -11,6 +11,7 @@ import sqlalchemy.orm
 import feelpycle_proxy as feelpycle
 import streamlit_feelcycle.model as model
 import streamlit_feelcycle.program as program
+import streamlit_feelcycle.wrapper as wrapper
 
 LOGGER = logging.getLogger(__name__)
 
@@ -234,17 +235,7 @@ def fetch_and_save_monthly_history(
 
             if store_id is not None:
                 try:
-                    cal = None
-                    if hasattr(account, "get_lesson_calendar_by_store"):
-                        cal = account.get_lesson_calendar_by_store(
-                            starting_date=lesson_info.shift_date,
-                            store_id=store_id,
-                        )
-                    elif hasattr(account, "get_lesson_calendar_by_store_nocache"):
-                        cal = account.get_lesson_calendar_by_store_nocache(
-                            starting_date=lesson_info.shift_date,
-                            store_id=store_id,
-                        )
+                    cal = wrapper.get_lesson_calendar(lesson_info.shift_date, store_id)
 
                     background_color, text_color = _extract_colors_from_calendar(
                         cal, lesson_info.sid

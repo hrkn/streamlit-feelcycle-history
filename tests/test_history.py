@@ -8,6 +8,7 @@ import sqlalchemy.orm
 import feelpycle_proxy as feelpycle
 import streamlit_feelcycle.history as history
 import streamlit_feelcycle.model as model
+import streamlit_feelcycle.wrapper as wrapper
 
 
 @pytest.fixture
@@ -774,17 +775,21 @@ def test_fetch_and_save_monthly_history_program_colors_success(
     )
     l_list = unittest.mock.MagicMock(schedule=[sched])
     cal_mock = unittest.mock.MagicMock(lesson_list=[l_list])
-    mock_account.get_lesson_calendar_by_store.return_value = cal_mock
 
     # 実行
-    res = history.fetch_and_save_monthly_history(mock_account, wa.id, 2026, 9, session)
-    assert res is not None
+    with unittest.mock.patch.object(
+        wrapper, "get_lesson_calendar", return_value=cal_mock
+    ) as mock_get_lesson_calendar:
+        res = history.fetch_and_save_monthly_history(
+            mock_account, wa.id, 2026, 9, session
+        )
+        assert res is not None
 
-    # Account.get_lesson_calendar_by_store が呼ばれたことを検証
-    mock_account.get_lesson_calendar_by_store.assert_called_once_with(
-        starting_date=datetime.date(2026, 9, 1),
-        store_id=10,
-    )
+        # wrapper.get_lesson_calendar が呼ばれたことを検証
+        mock_get_lesson_calendar.assert_called_once_with(
+            datetime.date(2026, 9, 1),
+            10,
+        )
 
     # Program レコードの背景色・文字色を検証
     prog = session.scalars(
