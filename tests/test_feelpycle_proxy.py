@@ -31,6 +31,28 @@ source = { git = "https://github.com/hrkn/feelpycle.git", commit = "1234567890ab
         assert commit == "1234567890abcdef"
 
 
+def test_get_locked_commit_hash_with_git_url_hash() -> None:
+    # uv.lock の git = "...#<commit_hash>" 形式から取得できるテスト
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        lock_file = tmp_path / "uv.lock"
+        lock_file.write_text(
+            """
+version = 1
+[[package]]
+name = "feelpycle"
+version = "0.1.0"
+source = { git = "ssh://git@github.com/hrkn/feelpycle.git#36886d987c2786c64e47bb071e5179dda7ff9663" }
+""",
+            encoding="utf-8",
+        )
+
+        commit = feelpycle_proxy.get_locked_commit_hash(
+            package_name="feelpycle", project_root=tmp_path
+        )
+        assert commit == "36886d987c2786c64e47bb071e5179dda7ff9663"
+
+
 def test_get_locked_commit_hash_fallback_pyproject() -> None:
     # 2. uv.lock がなく pyproject.toml の sources から取得できるテスト
     with tempfile.TemporaryDirectory() as tmp_dir:

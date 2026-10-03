@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "feelpycle",
     "python-dotenv>=1.2.2",
     "requests>=2.34.2",
     "sqlalchemy>=2.0.50",
@@ -24,7 +23,7 @@ build-backend = "setuptools.build_meta"
 extraPaths = ["src/streamlit_feelcycle"]
 
 [tool.uv.sources]
-feelpycle = { git = "git+ssh://git@github.com/hrkn/feelpycle.git" }
+feelpycle = { git = "git+ssh://git@github.com/hrkn/feelpycle.git", rev = "36886d987c2786c64e47bb071e5179dda7ff9663" }
 
 [dependency-groups]
 dev = [

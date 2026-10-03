@@ -26,6 +26,9 @@ def get_locked_commit_hash(
                     commit = source.get("commit")
                     if commit:
                         return str(commit)
+                    git_url = source.get("git")
+                    if isinstance(git_url, str) and "#" in git_url:
+                        return git_url.split("#", 1)[1]
         except Exception:
             pass
 
@@ -44,6 +47,9 @@ def get_locked_commit_hash(
             rev = sources.get("rev") or sources.get("tag")
             if rev:
                 return str(rev)
+            git_url = sources.get("git")
+            if isinstance(git_url, str) and "#" in git_url:
+                return git_url.split("#", 1)[1]
         except Exception:
             pass
 
