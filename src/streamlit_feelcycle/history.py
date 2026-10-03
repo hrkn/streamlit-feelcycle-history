@@ -3,12 +3,12 @@ import logging
 import typing
 
 import dateutil.relativedelta
+import feelpycle.api
 import pandas
 import pandas.io.formats.style
 import sqlalchemy
 import sqlalchemy.orm
 
-import feelpycle_proxy as feelpycle
 import streamlit_feelcycle.model as model
 import streamlit_feelcycle.program as program
 import streamlit_feelcycle.wrapper as wrapper

@@ -1,11 +1,11 @@
 import datetime
 import unittest.mock
 
+import feelpycle.api
 import pytest
 import sqlalchemy
 import sqlalchemy.orm
 
-import feelpycle_proxy as feelpycle
 import streamlit_feelcycle.history as history
 import streamlit_feelcycle.model as model
 import streamlit_feelcycle.wrapper as wrapper

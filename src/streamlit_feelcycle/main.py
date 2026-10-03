@@ -5,6 +5,7 @@ import pathlib
 import sys
 import time
 
+import feelpycle.api
 import pandas
 import sqlalchemy
 import sqlalchemy.orm
@@ -12,7 +13,6 @@ import streamlit as st
 import streamlit.runtime.scriptrunner
 import streamlit_persist_session
 
-import feelpycle_proxy as feelpycle
 import streamlit_feelcycle.database as database
 import streamlit_feelcycle.history as history
 import streamlit_feelcycle.model as model

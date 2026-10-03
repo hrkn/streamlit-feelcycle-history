@@ -13,7 +13,7 @@ Feelcycle 公式マイページからレッスン受講履歴を取得し、蓄�
   - [main.py](file:///c:/Users/mcs/Documents/develop/streamlit-feelcycle-history/src/streamlit_feelcycle/main.py): アプリケーションのエントリーポイントおよび UI 処理（ログイン、マイページ情報取得、履歴の可視化）
   - [database.py](file:///c:/Users/mcs/Documents/develop/streamlit-feelcycle-history/src/streamlit_feelcycle/database.py): データベース接続設定、SQLite-D1間の非同期同期処理
   - [model.py](file:///c:/Users/mcs/Documents/develop/streamlit-feelcycle-history/src/streamlit_feelcycle/model.py): SQLAlchemy を用いたデータベースモデル定義 (Person, WebMember, Lesson, Program, LessonHistory など)
-- `src/feelpycle_proxy/`: 非公式クライアント feelpycle の動的インストールおよび透過プロキシパッケージ
+- `packages/`: 非公式クライアント feelpycle の wheel パッケージ (feelpycle-0.1.0-py3-none-any.whl)
 - `d1-local-server/`: Cloudflare D1 API をエミュレートするローカル Worker サーバー
 - `doc/`: データベース設計書、テーブル定義 SQL ファイル
 - `tests/`: pytest によるテストスイート
@@ -28,7 +28,7 @@ Feelcycle 公式マイページからレッスン受講履歴を取得し、蓄�
 ## セットアップ手順
 
 ### 1. 依存関係のインストール
-プロジェクトのルートディレクトリで以下を実行し、Python の仮想環境と依存関係をセットアップします。非公式 API クライアントである `feelpycle` も自動的に Git からインストールされます。
+プロジェクトのルートディレクトリで以下を実行し、Python の仮想環境と依存関係をセットアップします。非公式 API クライアントである `feelpycle` も同梱の wheel パッケージ (`packages/`) から自動的にインストールされます。
 ```bash
 uv sync
 ```
@@ -45,33 +45,7 @@ cp .env.example .env
 
 ※ローカルの Mock サーバーを使用して動作させる場合は、`CF_D1_BASE_URL=http://localhost:8787` を指定します。
 
-### 3. GITHUB_TOKEN の取得と設定 (feelpycle 動的インストール用)
-本アプリケーションでは、非公開パッケージ `feelpycle` を `src/feelpycle_proxy/` 経由で動的にインストールする機能が組み込まれています。Streamlit Community Cloud へのデプロイ時や CI 環境などでプライベートリポジトリからパッケージを自動取得するため、GitHub の Personal Access Token (PAT) が必要です。
-
-#### GitHub Personal Access Token の取得手順 (Fine-grained PAT 推奨)
-1. GitHub にログインし、右上のプロフィールアイコンから **Settings** を開きます。
-2. 左サイドバー最下部の **Developer settings** を選択します。
-3. **Personal access tokens** -> **Fine-grained tokens** を選択し、**Generate new token** をクリックします。
-4. 以下の項目を設定します:
-   - **Token name**: 任意の識別名 (例: `streamlit-feelcycle-deploy`)
-   - **Expiration**: 有効期限 (例: 90 days または利用期間に応じた設定)
-   - **Repository access**: **Only select repositories** を選択し、対象の `feelpycle` リポジトリを選択
-   - **Permissions**: **Repository permissions** 内の **Contents** を **Read-only** に設定
-5. **Generate token** をクリックし、生成されたトークン文字列 (`github_pat_...`) をコピーして安全に控えます。
-
-#### トークンの設定方法
-- **Streamlit Community Cloud の場合**:
-  デプロイ先アプリの管理画面 (**App Settings** -> **Secrets**) に以下を記述します。
-  ```toml
-  GITHUB_TOKEN = "github_pat_xxxx..."
-  ```
-- **ローカル環境や CI 環境の場合**:
-  `.env` ファイル内に設定、またはシェル環境変数としてエクスポートします。
-  ```bash
-  GITHUB_TOKEN=github_pat_xxxx...
-  ```
-
-### 4. ローカル D1 データベースの初期化
+### 3. ローカル D1 データベースの初期化
 ローカルで D1 Mock サーバーを実行するにあたり、SQLite データベースのスキーマ初期化とテストデータの投入を行います。
 ```bash
 npx wrangler d1 execute my-first-db --local --file=doc/create_tables.sql

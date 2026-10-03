@@ -1,7 +1,7 @@
 import datetime
 import functools
 
-import feelpycle_proxy as feelpycle
+import feelpycle.api
 
 ACCOUNT = feelpycle.api.Account()
 
