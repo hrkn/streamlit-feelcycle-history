@@ -114,6 +114,8 @@ def ensure_installed(package_name: str = "feelpycle") -> None:
             pass
 
 
+ensure_installed()
+
 # isort: split
 import feelpycle_proxy.api as api
 
