@@ -1,9 +1,61 @@
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tomllib
 import typing
+
+
+def _run_install(repo_url: str) -> None:
+    """パッケージをインストールする。uv pip install、pip、ensurepip の順に試行する。"""
+    # 1. uv が利用可能な場合は uv pip install を優先 (SCCやuv環境で高速かつ確実)
+    uv_cmd = shutil.which("uv")
+    if not uv_cmd:
+        candidates = [
+            pathlib.Path.home() / ".cargo" / "bin" / "uv",
+            pathlib.Path.home() / ".local" / "bin" / "uv",
+            pathlib.Path(sys.executable).parent / "uv",
+        ]
+        for c in candidates:
+            if c.is_file():
+                uv_cmd = str(c)
+                break
+
+    if uv_cmd:
+        try:
+            subprocess.check_call([uv_cmd, "pip", "install", repo_url])
+            return
+        except Exception:
+            pass
+
+    # 2. python -m pip install を試行
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", repo_url])
+        return
+    except Exception:
+        pass
+
+    # 3. pip が存在しない場合、ensurepip で pip を導入してから再試行
+    try:
+        import ensurepip
+
+        ensurepip.bootstrap()
+        subprocess.check_call([sys.executable, "-m", "pip", "install", repo_url])
+        return
+    except Exception:
+        pass
+
+    # 4. python -m ensurepip サブプロセスを実行して再試行
+    try:
+        subprocess.check_call([sys.executable, "-m", "ensurepip", "--default-pip"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", repo_url])
+        return
+    except Exception:
+        pass
+
+    # 最終フォールバック
+    subprocess.check_call([sys.executable, "-m", "pip", "install", repo_url])
 
 
 def get_locked_commit_hash(
@@ -105,7 +157,7 @@ def ensure_installed(package_name: str = "feelpycle") -> None:
         except Exception:
             pass
 
-    subprocess.check_call([sys.executable, "-m", "pip", "install", repo_url])
+    _run_install(repo_url)
 
     if st_module is not None:
         try:

@@ -1,6 +1,7 @@
 import builtins
 import os
 import pathlib
+import sys
 import tempfile
 import unittest.mock
 
@@ -129,3 +130,26 @@ def test_ensure_installed_no_token_raises() -> None:
     ):
         with pytest.raises(RuntimeError, match="GITHUB_TOKEN を設定してください"):
             feelpycle_proxy.ensure_installed()
+
+
+def test_run_install_uses_uv_when_available() -> None:
+    with (
+        unittest.mock.patch("shutil.which", return_value="/usr/local/bin/uv"),
+        unittest.mock.patch("subprocess.check_call") as mock_check_call,
+    ):
+        feelpycle_proxy._run_install("git+https://example.com/repo.git")
+        mock_check_call.assert_called_once_with(
+            ["/usr/local/bin/uv", "pip", "install", "git+https://example.com/repo.git"]
+        )
+
+
+def test_run_install_fallback_to_pip() -> None:
+    with (
+        unittest.mock.patch("shutil.which", return_value=None),
+        unittest.mock.patch("pathlib.Path.is_file", return_value=False),
+        unittest.mock.patch("subprocess.check_call") as mock_check_call,
+    ):
+        feelpycle_proxy._run_install("git+https://example.com/repo.git")
+        mock_check_call.assert_called_once_with(
+            [sys.executable, "-m", "pip", "install", "git+https://example.com/repo.git"]
+        )
