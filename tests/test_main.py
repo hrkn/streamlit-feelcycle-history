@@ -2,12 +2,12 @@ import datetime
 import pathlib
 import unittest.mock
 
-import feelpycle.api
 import pytest
 import sqlalchemy
 import sqlalchemy.orm
 import streamlit.testing.v1
 
+import feelpycle_proxy as feelpycle
 import streamlit_feelcycle.database as db
 import streamlit_feelcycle.model as model
 
