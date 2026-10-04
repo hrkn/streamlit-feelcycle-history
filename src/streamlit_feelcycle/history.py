@@ -397,6 +397,11 @@ def get_monthly_histories_from_db(
         acc_icon = "🚴"
         if h.web_account and h.web_account.icon:
             acc_icon = h.web_account.icon
+        instructor_name = h.lesson.instructor_name_1
+        if h.lesson.instructor_name_2:
+            instructor_name = (
+                f"{h.lesson.instructor_name_1} / {h.lesson.instructor_name_2}"
+            )
         result.append(
             {
                 "アカウント": acc_icon,
@@ -404,7 +409,7 @@ def get_monthly_histories_from_db(
                 "開始時刻": h.lesson.start_at.strftime("%H:%M"),
                 "終了時刻": h.lesson.end_at.strftime("%H:%M"),
                 "プログラム": prog.name if prog else "",
-                "インストラクター": h.lesson.instructor_name_1,
+                "インストラクター": instructor_name,
                 "店舗": h.lesson.store_name,
                 "バイク": h.bike_number,
                 "チケット": h.ticket_type or "-",
@@ -648,8 +653,7 @@ def get_instructor_summary(
 ) -> list[dict[str, typing.Any]]:
     """インストラクター別の初回受講日と受講回数を集計して返す。
 
-    instructor_id_2 / instructor_name_2 が設定されているレッスンは、
-    サブインストラクターの受講回数としてもカウントする。
+    ペアでのレッスンの場合は「メイン / サブ」として1つのペア枠(1回分)として集計する。
     year と month を指定するとその年月のレッスンのみを対象とし、
     year のみ指定するとその年のレッスン全体を対象とする。
     order_by_count が True の場合は受講回数の降順でソートする。
@@ -680,40 +684,27 @@ def get_instructor_summary(
             ]
         )
 
-    stmt_1 = (
+    instructor_expr = sqlalchemy.case(
+        (
+            sqlalchemy.and_(
+                model.Lesson.instructor_name_2.is_not(None),
+                model.Lesson.instructor_name_2 != "",
+            ),
+            model.Lesson.instructor_name_1 + " / " + model.Lesson.instructor_name_2,
+        ),
+        else_=model.Lesson.instructor_name_1,
+    ).label("instructor_name")
+
+    stmt = (
         sqlalchemy.select(
-            model.Lesson.instructor_name_1.label("instructor_name"),
-            model.Lesson.start_at.label("start_at"),
-            model.LessonHistory.id.label("history_id"),
+            instructor_expr,
+            sqlalchemy.func.min(model.Lesson.start_at).label("first_taken"),
+            sqlalchemy.func.count(model.LessonHistory.id).label("count"),
         )
         .join(model.LessonHistory, model.LessonHistory.lesson_sid == model.Lesson.sid)
         .where(*filters)
+        .group_by(instructor_expr)
     )
-
-    stmt_2 = (
-        sqlalchemy.select(
-            model.Lesson.instructor_name_2.label("instructor_name"),
-            model.Lesson.start_at.label("start_at"),
-            model.LessonHistory.id.label("history_id"),
-        )
-        .join(model.LessonHistory, model.LessonHistory.lesson_sid == model.Lesson.sid)
-        .where(
-            *filters,
-            model.Lesson.instructor_id_2.is_not(None),
-            model.Lesson.instructor_name_2.is_not(None),
-            model.Lesson.instructor_name_2 != "",
-        )
-    )
-
-    combined = sqlalchemy.union_all(stmt_1, stmt_2).subquery()
-
-    stmt = sqlalchemy.select(
-        combined.c.instructor_name,
-        sqlalchemy.func.min(combined.c.start_at, type_=sqlalchemy.DateTime).label(
-            "first_taken"
-        ),
-        sqlalchemy.func.count(combined.c.history_id).label("count"),
-    ).group_by(combined.c.instructor_name)
     if order_by_count:
         stmt = stmt.order_by(
             sqlalchemy.desc("count"),
@@ -723,26 +714,16 @@ def get_instructor_summary(
         stmt = stmt.order_by(sqlalchemy.text("first_taken"))
 
     rows = session.execute(stmt).all()
-    result = []
-    for row in rows:
-        first_taken_str = ""
-        if row.first_taken:
-            if isinstance(row.first_taken, str):
-                try:
-                    dt = datetime.datetime.fromisoformat(row.first_taken)
-                    first_taken_str = dt.strftime("%Y/%m/%d")
-                except ValueError:
-                    first_taken_str = row.first_taken
-            elif hasattr(row.first_taken, "strftime"):
-                first_taken_str = row.first_taken.strftime("%Y/%m/%d")
-        result.append(
-            {
-                "Instructor": row.instructor_name,
-                "First taken": first_taken_str,
-                "count": row.count,
-            }
-        )
-    return result
+    return [
+        {
+            "Instructor": row.instructor_name,
+            "First taken": row.first_taken.strftime("%Y/%m/%d")
+            if row.first_taken
+            else "",
+            "count": row.count,
+        }
+        for row in rows
+    ]
 
 
 def get_program_summary(

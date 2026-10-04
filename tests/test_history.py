@@ -1231,7 +1231,20 @@ def test_get_instructor_summary_with_instructor_2(
         end_at=datetime.datetime(2026, 8, 1, 13, 45),
         program_id=prog.id,
     )
-    session.add_all([lesson1, lesson2, lesson3, lesson4])
+    # レッスン5: 2026-09-01, Main: Anna, Sub: Bob (2回目の受講)
+    lesson5 = model.Lesson(
+        sid="sid_sub_5",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=101,
+        instructor_name_1="Anna",
+        instructor_id_2=102,
+        instructor_name_2="Bob",
+        start_at=datetime.datetime(2026, 9, 1, 10, 0),
+        end_at=datetime.datetime(2026, 9, 1, 10, 45),
+        program_id=prog.id,
+    )
+    session.add_all([lesson1, lesson2, lesson3, lesson4, lesson5])
     session.flush()
 
     hist1 = model.LessonHistory(
@@ -1258,36 +1271,53 @@ def test_get_instructor_summary_with_instructor_2(
         bike_number="04",
         is_absent=True,
     )
-    session.add_all([hist1, hist2, hist3, hist4])
+    hist5 = model.LessonHistory(
+        web_account_id=wa.id,
+        lesson_sid=lesson5.sid,
+        bike_number="05",
+        is_absent=False,
+    )
+    session.add_all([hist1, hist2, hist3, hist4, hist5])
     session.commit()
 
     wa_ids = [wa.id]
 
+    # 受講履歴一覧 (get_monthly_histories_from_db) の検証: ペアの場合はスラッシュ区切り
+    hist_list = history.get_monthly_histories_from_db(
+        wa_ids, year=2026, month=5, session=session
+    )
+    assert len(hist_list) == 1
+    assert hist_list[0]["インストラクター"] == "Anna / Bob"
+
     # 全期間集計 (order_by_count=True)
     summary_all = history.get_instructor_summary(wa_ids, session, order_by_count=True)
     assert len(summary_all) == 3
-    # Anna: 2回 (lesson1のメイン + lesson3のサブ)
-    # Bob: 2回 (lesson1のサブ + lesson2のメイン), Charlie: 1回
-    summary_dict = {row["Instructor"]: row for row in summary_all}
-    assert summary_dict["Anna"]["count"] == 2
-    assert summary_dict["Anna"]["First taken"] == "2026/05/01"
-    assert summary_dict["Bob"]["count"] == 2
-    assert summary_dict["Bob"]["First taken"] == "2026/05/01"
-    assert summary_dict["Charlie"]["count"] == 1
-    assert summary_dict["Charlie"]["First taken"] == "2026/07/01"
-    assert "David" not in summary_dict
+    # Anna / Bob: 2回 (lesson1 + lesson5), Bob: 1回 (lesson2), Charlie / Anna: 1回 (lesson3)
+    assert summary_all[0]["Instructor"] == "Anna / Bob"
+    assert summary_all[0]["count"] == 2
+    assert summary_all[0]["First taken"] == "2026/05/01"
 
-    # 2026年5月集計 (lesson1のみ: Annaメイン, Bobサブ)
+    summary_dict = {row["Instructor"]: row for row in summary_all}
+    assert summary_dict["Bob"]["count"] == 1
+    assert summary_dict["Bob"]["First taken"] == "2026/06/01"
+    assert summary_dict["Charlie / Anna"]["count"] == 1
+    assert summary_dict["Charlie / Anna"]["First taken"] == "2026/07/01"
+    assert "David / Bob" not in summary_dict
+    assert "David" not in summary_dict
+    assert "Anna" not in summary_dict  # Anna単独は受講していないため存在しない
+
+    # 2026年5月集計 (lesson1のみ: Anna / Bob)
     summary_may = history.get_instructor_summary(
         wa_ids, session, year=2026, month=5, order_by_count=True
     )
-    assert len(summary_may) == 2
-    may_dict = {row["Instructor"]: row for row in summary_may}
-    assert may_dict["Anna"]["count"] == 1
-    assert may_dict["Bob"]["count"] == 1
+    assert len(summary_may) == 1
+    assert summary_may[0]["Instructor"] == "Anna / Bob"
+    assert summary_may[0]["count"] == 1
 
     # order_by_count=False (first_taken順)
     summary_asc = history.get_instructor_summary(wa_ids, session, order_by_count=False)
     assert len(summary_asc) == 3
-    # lesson1 (5/1) で受講したAnna, Bobが先に来て、Charlie (7/1) が最後
-    assert summary_asc[2]["Instructor"] == "Charlie"
+    # First taken順: Anna / Bob (5/1) -> Bob (6/1) -> Charlie / Anna (7/1)
+    assert summary_asc[0]["Instructor"] == "Anna / Bob"
+    assert summary_asc[1]["Instructor"] == "Bob"
+    assert summary_asc[2]["Instructor"] == "Charlie / Anna"
