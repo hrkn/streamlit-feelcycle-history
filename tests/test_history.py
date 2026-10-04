@@ -1162,3 +1162,132 @@ def test_summary_functions_with_filters_and_order(
     assert history.get_total_lesson_count(wa_ids, session, year=2026, month=10) == 1
     assert history.get_total_lesson_count(wa_ids, session, year=2025) == 1
     assert history.get_total_lesson_count(wa_ids, session, year=2024) == 0
+
+
+def test_get_instructor_summary_with_instructor_2(
+    session: sqlalchemy.orm.Session,
+) -> None:
+    member = model.Member(name="Instructor 2 Test User")
+    session.add(member)
+    session.flush()
+
+    wa = model.WebAccount(email="instructor2_test@example.com", member_id=member.id)
+    session.add(wa)
+    session.flush()
+
+    prog = model.Program(name="BB2 Test", background_color="#000", text_color="#fff")
+    session.add(prog)
+    session.flush()
+
+    # レッスン1: 2026-05-01, Main: Anna, Sub: Bob
+    lesson1 = model.Lesson(
+        sid="sid_sub_1",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=101,
+        instructor_name_1="Anna",
+        instructor_id_2=102,
+        instructor_name_2="Bob",
+        start_at=datetime.datetime(2026, 5, 1, 10, 0),
+        end_at=datetime.datetime(2026, 5, 1, 10, 45),
+        program_id=prog.id,
+    )
+    # レッスン2: 2026-06-01, Main: Bob, Sub: None
+    lesson2 = model.Lesson(
+        sid="sid_sub_2",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=102,
+        instructor_name_1="Bob",
+        instructor_id_2=None,
+        instructor_name_2=None,
+        start_at=datetime.datetime(2026, 6, 1, 11, 0),
+        end_at=datetime.datetime(2026, 6, 1, 11, 45),
+        program_id=prog.id,
+    )
+    # レッスン3: 2026-07-01, Main: Charlie, Sub: Anna
+    lesson3 = model.Lesson(
+        sid="sid_sub_3",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=103,
+        instructor_name_1="Charlie",
+        instructor_id_2=101,
+        instructor_name_2="Anna",
+        start_at=datetime.datetime(2026, 7, 1, 12, 0),
+        end_at=datetime.datetime(2026, 7, 1, 12, 45),
+        program_id=prog.id,
+    )
+    # レッスン4: 2026-08-01, Main: David, Sub: Bob (キャンセル/欠席)
+    lesson4 = model.Lesson(
+        sid="sid_sub_4",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=104,
+        instructor_name_1="David",
+        instructor_id_2=102,
+        instructor_name_2="Bob",
+        start_at=datetime.datetime(2026, 8, 1, 13, 0),
+        end_at=datetime.datetime(2026, 8, 1, 13, 45),
+        program_id=prog.id,
+    )
+    session.add_all([lesson1, lesson2, lesson3, lesson4])
+    session.flush()
+
+    hist1 = model.LessonHistory(
+        web_account_id=wa.id,
+        lesson_sid=lesson1.sid,
+        bike_number="01",
+        is_absent=False,
+    )
+    hist2 = model.LessonHistory(
+        web_account_id=wa.id,
+        lesson_sid=lesson2.sid,
+        bike_number="02",
+        is_absent=False,
+    )
+    hist3 = model.LessonHistory(
+        web_account_id=wa.id,
+        lesson_sid=lesson3.sid,
+        bike_number="03",
+        is_absent=False,
+    )
+    hist4 = model.LessonHistory(
+        web_account_id=wa.id,
+        lesson_sid=lesson4.sid,
+        bike_number="04",
+        is_absent=True,
+    )
+    session.add_all([hist1, hist2, hist3, hist4])
+    session.commit()
+
+    wa_ids = [wa.id]
+
+    # 全期間集計 (order_by_count=True)
+    summary_all = history.get_instructor_summary(wa_ids, session, order_by_count=True)
+    assert len(summary_all) == 3
+    # Anna: 2回 (lesson1のメイン + lesson3のサブ)
+    # Bob: 2回 (lesson1のサブ + lesson2のメイン), Charlie: 1回
+    summary_dict = {row["Instructor"]: row for row in summary_all}
+    assert summary_dict["Anna"]["count"] == 2
+    assert summary_dict["Anna"]["First taken"] == "2026/05/01"
+    assert summary_dict["Bob"]["count"] == 2
+    assert summary_dict["Bob"]["First taken"] == "2026/05/01"
+    assert summary_dict["Charlie"]["count"] == 1
+    assert summary_dict["Charlie"]["First taken"] == "2026/07/01"
+    assert "David" not in summary_dict
+
+    # 2026年5月集計 (lesson1のみ: Annaメイン, Bobサブ)
+    summary_may = history.get_instructor_summary(
+        wa_ids, session, year=2026, month=5, order_by_count=True
+    )
+    assert len(summary_may) == 2
+    may_dict = {row["Instructor"]: row for row in summary_may}
+    assert may_dict["Anna"]["count"] == 1
+    assert may_dict["Bob"]["count"] == 1
+
+    # order_by_count=False (first_taken順)
+    summary_asc = history.get_instructor_summary(wa_ids, session, order_by_count=False)
+    assert len(summary_asc) == 3
+    # lesson1 (5/1) で受講したAnna, Bobが先に来て、Charlie (7/1) が最後
+    assert summary_asc[2]["Instructor"] == "Charlie"
