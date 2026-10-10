@@ -877,3 +877,24 @@ def get_studio_summary(
         }
         for row in rows
     ]
+
+
+def unlink_web_account(
+    web_account_id: int,
+    session: sqlalchemy.orm.Session,
+) -> None:
+    """指定されたWebアカウントの連携を解除し、関連データを削除する。"""
+    session.execute(
+        sqlalchemy.delete(model.LessonHistory).where(
+            model.LessonHistory.web_account_id == web_account_id
+        )
+    )
+    session.execute(
+        sqlalchemy.delete(model.WebAccountHistoryUpdate).where(
+            model.WebAccountHistoryUpdate.web_account_id == web_account_id
+        )
+    )
+    session.execute(
+        sqlalchemy.delete(model.WebAccount).where(model.WebAccount.id == web_account_id)
+    )
+    session.commit()

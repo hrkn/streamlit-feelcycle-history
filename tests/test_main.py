@@ -42,11 +42,22 @@ def mock_env():
 @pytest.fixture(autouse=True)
 def db_reset():
     # 各テストの実行前にデータベースをクリーンアップして初期化する
+    while not db.sync_queue.empty():
+        try:
+            db.sync_queue.get_nowait()
+        except Exception:
+            break
+
     d1_engine = get_d1_engine()
     local_engine = db.get_local_engine()
 
     # D1 (Mock Server) 側の初期化
-    model.Base.metadata.drop_all(d1_engine)
+    for tbl in reversed(model.Base.metadata.sorted_tables):
+        try:
+            with d1_engine.begin() as conn:
+                conn.execute(sqlalchemy.text(f'DROP TABLE IF EXISTS "{tbl.name}"'))
+        except Exception:
+            pass
     model.Base.metadata.create_all(d1_engine)
     with sqlalchemy.orm.Session(d1_engine) as session:
         member1 = model.Member(name="Alice")
@@ -213,3 +224,128 @@ def test_history_ui_and_sync() -> None:
         assert len(metrics) > 0
         # データフレームが存在すること (当月分のデータが自動取得済み)
         assert len(at.dataframe) > 0
+
+
+def test_duplicate_account_registration_blocked() -> None:
+    at = streamlit.testing.v1.AppTest.from_file(MAIN_PY_PATH)
+
+    mock_account_instance = unittest.mock.MagicMock()
+    mock_account_instance.login.return_value = True
+    mock_account_instance.get_first_lesson_date.return_value = datetime.datetime(
+        2024, 1, 1, 10, 0
+    )
+    mock_mypage = unittest.mock.MagicMock()
+    mock_mypage.member_name = "Alice"
+    mock_mypage.store = ["RPG"]
+    mock_mypage.member_type = "マンスリー"
+    mock_account_instance.mypage.return_value = mock_mypage
+
+    with unittest.mock.patch(
+        "feelpycle.api.Account", return_value=mock_account_instance
+    ):
+        at.run(timeout=30)
+        # Aliceでログイン
+        at.text_input[0].input("alice@example.com")
+        at.text_input[1].input("password123")
+        at.button[0].click().run(timeout=30)
+
+        assert at.session_state.logged_in
+
+        # 「➕ アカウント追加」ボタンをクリックしてダイアログを開く
+        add_btn = next(b for b in at.sidebar.button if "アカウント追加" in b.label)
+        add_btn.click().run(timeout=30)
+
+        # ダイアログ内のフォームに既存の alice@example.com を入力して送信
+        at.text_input[0].input("alice@example.com")
+        at.text_input[1].input("password123")
+
+        # ダイアログを開いた状態を維持しながら送信ボタンをクリック
+        new_add_btn = next(b for b in at.sidebar.button if "アカウント追加" in b.label)
+        submit_btn = next(b for b in at.button if "追加して履歴を同期" in b.label)
+        new_add_btn.click()
+        submit_btn.click().run(timeout=30)
+
+        # 「既に連携済みのアカウントです。」のエラーが表示されること
+        assert any("既に連携済みのアカウントです。" in e.value for e in at.error)
+
+
+def test_unlink_button_behavior() -> None:
+    # ローカルDBにAliceの2つ目のWebアカウントを追加
+    with sqlalchemy.orm.Session(db.get_local_engine()) as session:
+        alice_member = session.scalars(
+            sqlalchemy.select(model.Member).where(model.Member.name == "Alice")
+        ).first()
+        assert alice_member is not None
+        wa_second = model.WebAccount(
+            email="alice_sub@example.com",
+            member_id=alice_member.id,
+            icon="🐱",
+        )
+        session.add(wa_second)
+        session.commit()
+        second_wa_id = wa_second.id
+
+    at = streamlit.testing.v1.AppTest.from_file(MAIN_PY_PATH)
+
+    mock_account_instance = unittest.mock.MagicMock()
+    mock_account_instance.login.return_value = True
+    mock_account_instance.get_first_lesson_date.return_value = datetime.datetime(
+        2024, 1, 1, 10, 0
+    )
+    mock_mypage = unittest.mock.MagicMock()
+    mock_mypage.member_name = "Alice"
+    mock_mypage.store = ["RPG"]
+    mock_mypage.member_type = "マンスリー"
+    mock_account_instance.mypage.return_value = mock_mypage
+
+    with unittest.mock.patch(
+        "feelpycle.api.Account", return_value=mock_account_instance
+    ):
+        at.run(timeout=30)
+        # alice@example.com でログイン
+        at.text_input[0].input("alice@example.com")
+        at.text_input[1].input("password123")
+        at.button[0].click().run(timeout=30)
+
+        assert at.session_state.logged_in
+
+        # サイドバー上の解除ボタンを検証
+        unlink_btns = [
+            b for b in at.sidebar.button if b.key and b.key.startswith("unlink_btn_")
+        ]
+        assert len(unlink_btns) == 2
+
+        # ログイン中のアカウントのボタンは無効 (disabled=True)
+        login_btn = next(
+            b for b in unlink_btns if "ログイン中のため解除できません" in (b.help or "")
+        )
+        assert login_btn.disabled is True
+
+        # 別アカウント (alice_sub@example.com) のボタンは有効 (disabled=False)
+        sub_btn = next(b for b in unlink_btns if f"unlink_btn_{second_wa_id}" == b.key)
+        assert sub_btn.disabled is False
+
+        # 解除ボタンをクリックしてダイアログを開く
+        sub_btn.click().run(timeout=30)
+
+        # ダイアログを開いた状態を維持しながら「解除する」ボタンをクリック
+        new_sub_btn = next(
+            b for b in at.sidebar.button if f"unlink_btn_{second_wa_id}" == b.key
+        )
+        confirm_btn = next(
+            b for b in at.button if b.key == f"confirm_unlink_{second_wa_id}"
+        )
+        new_sub_btn.click()
+        confirm_btn.click().run(timeout=30)
+
+        # 解除後、ローカルDBから alice_sub@example.com が削除されていること
+        with sqlalchemy.orm.Session(db.get_local_engine()) as session:
+            deleted_wa = session.get(model.WebAccount, second_wa_id)
+            assert deleted_wa is None
+
+        # 残った連携アカウントが1つだけの場合、解除ボタンが無効化されていること
+        remaining_unlink_btns = [
+            b for b in at.sidebar.button if b.key and b.key.startswith("unlink_btn_")
+        ]
+        assert len(remaining_unlink_btns) == 1
+        assert remaining_unlink_btns[0].disabled is True

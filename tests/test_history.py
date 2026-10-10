@@ -1496,3 +1496,108 @@ def test_exclude_zero_bike_and_empty_ticket(session: sqlalchemy.orm.Session) -> 
     # 7. 初回受講日判定 (get_first_lesson_year_month)
     first_ym = history.get_first_lesson_year_month(None, wa_ids, session)
     assert first_ym == (2026, 8)
+
+
+def test_unlink_web_account(session: sqlalchemy.orm.Session) -> None:
+    # 2つのアカウントとそれぞれに紐づく受講履歴、更新履歴を作成
+    member = model.Member(name="Test Member")
+    session.add(member)
+    session.flush()
+
+    wa1 = model.WebAccount(email="user1@example.com", member_id=member.id, icon="🚴")
+    wa2 = model.WebAccount(email="user2@example.com", member_id=member.id, icon="🐱")
+    session.add_all([wa1, wa2])
+    session.flush()
+
+    prog = model.Program(name="BB2 Test")
+    session.add(prog)
+    session.flush()
+
+    lesson1 = model.Lesson(
+        sid="lesson_1",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=1,
+        instructor_name_1="Inst1",
+        start_at=datetime.datetime(2026, 8, 1, 10, 0),
+        end_at=datetime.datetime(2026, 8, 1, 10, 45),
+        program_id=prog.id,
+    )
+    lesson2 = model.Lesson(
+        sid="lesson_2",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=1,
+        instructor_name_1="Inst1",
+        start_at=datetime.datetime(2026, 8, 2, 10, 0),
+        end_at=datetime.datetime(2026, 8, 2, 10, 45),
+        program_id=prog.id,
+    )
+    session.add_all([lesson1, lesson2])
+    session.flush()
+
+    h1 = model.LessonHistory(
+        web_account_id=wa1.id,
+        lesson_sid=lesson1.sid,
+        bike_number="1",
+        ticket_type="マンスリー",
+        is_absent=False,
+    )
+    h2 = model.LessonHistory(
+        web_account_id=wa2.id,
+        lesson_sid=lesson2.sid,
+        bike_number="2",
+        ticket_type="マンスリー",
+        is_absent=False,
+    )
+    session.add_all([h1, h2])
+
+    upd1 = model.WebAccountHistoryUpdate(
+        web_account_id=wa1.id,
+        year=2026,
+        month=8,
+    )
+    upd2 = model.WebAccountHistoryUpdate(
+        web_account_id=wa2.id,
+        year=2026,
+        month=8,
+    )
+    session.add_all([upd1, upd2])
+    session.commit()
+
+    # wa1 を連携解除
+    history.unlink_web_account(wa1.id, session)
+
+    # wa1 およびその履歴、更新情報が削除されたことを検証
+    assert session.get(model.WebAccount, wa1.id) is None
+    assert (
+        session.scalars(
+            sqlalchemy.select(model.LessonHistory).where(
+                model.LessonHistory.web_account_id == wa1.id
+            )
+        ).all()
+        == []
+    )
+    assert (
+        session.scalars(
+            sqlalchemy.select(model.WebAccountHistoryUpdate).where(
+                model.WebAccountHistoryUpdate.web_account_id == wa1.id
+            )
+        ).all()
+        == []
+    )
+
+    # wa2 はそのまま残っていることを検証
+    assert session.get(model.WebAccount, wa2.id) is not None
+    wa2_histories = session.scalars(
+        sqlalchemy.select(model.LessonHistory).where(
+            model.LessonHistory.web_account_id == wa2.id
+        )
+    ).all()
+    assert len(wa2_histories) == 1
+    wa2_updates = session.scalars(
+        sqlalchemy.select(model.WebAccountHistoryUpdate).where(
+            model.WebAccountHistoryUpdate.web_account_id == wa2.id
+        )
+    ).all()
+    assert len(wa2_updates) == 1

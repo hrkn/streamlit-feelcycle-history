@@ -187,6 +187,15 @@ def show_add_account_dialog(target_member_id: int) -> None:
             st.error("メールアドレスとパスワードを入力してください。")
             return
 
+        with sqlalchemy.orm.Session(database.local_engine) as session:
+            stmt = sqlalchemy.select(model.WebAccount).where(
+                model.WebAccount.email == new_email
+            )
+            existing_wa = session.scalars(stmt).first()
+            if existing_wa:
+                st.error("既に連携済みのアカウントです。")
+                return
+
         add_account = feelpycle.api.Account()
         if add_account.login(id=new_email, password=new_password):
             with sqlalchemy.orm.Session(database.local_engine) as session:
@@ -195,27 +204,17 @@ def show_add_account_dialog(target_member_id: int) -> None:
                 )
                 existing_wa = session.scalars(stmt).first()
                 if existing_wa:
-                    if existing_wa.member_id == target_member_id:
-                        existing_wa.icon = selected_icon
-                        session.commit()
-                        st.info(
-                            "既に連携済みのアカウントです。アイコンを更新しました。"
-                        )
-                    else:
-                        existing_wa.member_id = target_member_id
-                        existing_wa.icon = selected_icon
-                        session.commit()
-                        st.success("既存アカウントを現在の会員に紐付けました。")
-                    target_wa_id = existing_wa.id
-                else:
-                    new_wa = model.WebAccount(
-                        email=new_email,
-                        member_id=target_member_id,
-                        icon=selected_icon,
-                    )
-                    session.add(new_wa)
-                    session.commit()
-                    target_wa_id = new_wa.id
+                    st.error("既に連携済みのアカウントです。")
+                    return
+
+                new_wa = model.WebAccount(
+                    email=new_email,
+                    member_id=target_member_id,
+                    icon=selected_icon,
+                )
+                session.add(new_wa)
+                session.commit()
+                target_wa_id = new_wa.id
 
                 progress_bar = st.progress(0.0, text="受講履歴の更新準備中...")
 
@@ -250,6 +249,42 @@ def show_add_account_dialog(target_member_id: int) -> None:
             st.error(
                 "ログインに失敗しました。メールアドレスまたはパスワードが正しくありません。"
             )
+
+
+@st.dialog("アカウント連携解除")
+def show_unlink_account_dialog(web_account_id: int, email: str) -> None:
+    st.write(f"**{email}** の連携を解除しますか？")
+    st.caption("解除すると、このアカウントに関連する受講履歴データも削除されます。")
+
+    current_member_id = st.session_state.get("member_id")
+    with sqlalchemy.orm.Session(database.local_engine) as session:
+        stmt = sqlalchemy.select(model.WebAccount).where(
+            model.WebAccount.member_id == current_member_id
+        )
+        linked_count = len(session.scalars(stmt).all())
+
+    if linked_count <= 1:
+        st.error("連携アカウントが1つのため解除できません。")
+        return
+
+    if email == st.session_state.get("email"):
+        st.error("ログイン中のアカウントは解除できません。")
+        return
+
+    col_confirm, col_cancel = st.columns([1, 1])
+    with col_confirm:
+        if st.button(
+            "解除する", type="primary", key=f"confirm_unlink_{web_account_id}"
+        ):
+            with sqlalchemy.orm.Session(database.local_engine) as session:
+                history.unlink_web_account(web_account_id, session)
+            st.session_state.first_lesson_year = None
+            st.success("連携を解除しました。")
+            time.sleep(0.5)
+            st.rerun()
+    with col_cancel:
+        if st.button("キャンセル", key=f"cancel_unlink_{web_account_id}"):
+            st.rerun()
 
 
 @st.dialog("アイコン変更")
@@ -321,17 +356,34 @@ with st.sidebar:
             st.subheader("連携アカウント")
             for wa in linked_accounts:
                 icon_str = wa.icon if wa.icon else "🚴"
-                badge = " (ログイン中)" if wa.email == st.session_state.email else ""
-                col_info, col_btn = st.columns([4, 1])
+                is_current_login = wa.email == st.session_state.email
+                badge = " (ログイン中)" if is_current_login else ""
+                col_info, col_edit, col_del = st.columns([3, 1, 1])
                 with col_info:
                     st.write(f"{icon_str} **{wa.email}**{badge}")
-                with col_btn:
+                with col_edit:
                     if st.button(
                         "✏️",
                         key=f"edit_icon_btn_{wa.id}",
                         help="アイコンを変更",
                     ):
                         show_edit_icon_dialog(wa.id, wa.email, wa.icon)
+                with col_del:
+                    can_unlink = len(linked_accounts) > 1 and not is_current_login
+                    if is_current_login:
+                        unlink_help = "ログイン中のため解除できません"
+                    elif len(linked_accounts) <= 1:
+                        unlink_help = "連携アカウントが1つのため解除できません"
+                    else:
+                        unlink_help = "連携を解除"
+
+                    if st.button(
+                        "🗑️",
+                        key=f"unlink_btn_{wa.id}",
+                        disabled=not can_unlink,
+                        help=unlink_help,
+                    ):
+                        show_unlink_account_dialog(wa.id, wa.email)
 
             if st.button("➕ アカウント追加"):
                 show_add_account_dialog(current_member_id)

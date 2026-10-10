@@ -50,10 +50,16 @@ class WebAccount(Base):
         back_populates="web_accounts"
     )
     histories: sqlalchemy.orm.Mapped[list["LessonHistory"]] = (
-        sqlalchemy.orm.relationship(back_populates="web_account")
+        sqlalchemy.orm.relationship(
+            back_populates="web_account",
+            cascade="all, delete-orphan",
+        )
     )
     history_updates: sqlalchemy.orm.Mapped[list["WebAccountHistoryUpdate"]] = (
-        sqlalchemy.orm.relationship(back_populates="web_account")
+        sqlalchemy.orm.relationship(
+            back_populates="web_account",
+            cascade="all, delete-orphan",
+        )
     )
 
 
