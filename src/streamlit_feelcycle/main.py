@@ -178,6 +178,7 @@ def show_add_account_dialog(target_member_id: int) -> None:
             "アイコン",
             options=available_icons,
             index=0,
+            filter_mode=None,
         )
         submit_add = st.form_submit_button("追加して履歴を同期")
 
@@ -281,6 +282,7 @@ def show_edit_icon_dialog(web_account_id: int, email: str, current_icon: str) ->
         options=available_icons,
         index=current_index,
         key=f"edit_icon_select_{web_account_id}",
+        filter_mode=None,
     )
     if st.button("変更を保存", key=f"save_icon_btn_{web_account_id}"):
         with sqlalchemy.orm.Session(database.local_engine) as session:
@@ -534,6 +536,7 @@ else:
                 options=year_month_options,
                 index=0,
                 key="history_selected_year_month",
+                filter_mode=None,
             )
 
         selected_year = int(selected_ym.split("年")[0])
@@ -580,6 +583,7 @@ else:
                 options=statistics_period_options,
                 index=0,
                 key="statistics_selected_period",
+                filter_mode=None,
             )
 
         filter_year, filter_month = history.parse_period_option(selected_period)
