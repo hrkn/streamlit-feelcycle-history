@@ -1321,3 +1321,178 @@ def test_get_instructor_summary_with_instructor_2(
     assert summary_asc[0]["Instructor"] == "Anna / Bob"
     assert summary_asc[1]["Instructor"] == "Bob"
     assert summary_asc[2]["Instructor"] == "Charlie / Anna"
+
+
+def test_exclude_zero_bike_and_empty_ticket(session: sqlalchemy.orm.Session) -> None:
+    member = model.Member(name="FilterTestUser")
+    session.add(member)
+    session.flush()
+
+    web_account = model.WebAccount(
+        email="filter_test@example.com", member_id=member.id, icon="🚴"
+    )
+    session.add(web_account)
+    session.flush()
+
+    prog = model.Program(name="BB1 Filter", background_color="#111", text_color="#eee")
+    session.add(prog)
+    session.flush()
+
+    # レッスンの作成
+    # 1. 対象: bike="1", ticket="マンスリー"
+    # 2. 対象: bike="2", ticket=None (nullは除外しない)
+    # 3. 対象: bike="0", ticket="マンスリー" (bike=0だがticketあり)
+    # 4. 対象: bike="3", ticket="" (ticket空だがbike!=0)
+    # 5. 対象: bike="0", ticket=None (bike=0だがticketはnullで空文字ではない)
+    # 6. 除外: bike="0", ticket="" (bike=0 かつ ticket空文字の両方を満たす)
+    l1 = model.Lesson(
+        sid="l_1",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=1,
+        instructor_name_1="Inst1",
+        start_at=datetime.datetime(2026, 8, 1, 10, 0),
+        end_at=datetime.datetime(2026, 8, 1, 10, 45),
+        program_id=prog.id,
+    )
+    l2 = model.Lesson(
+        sid="l_2",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=2,
+        instructor_name_1="Inst2",
+        start_at=datetime.datetime(2026, 8, 2, 10, 0),
+        end_at=datetime.datetime(2026, 8, 2, 10, 45),
+        program_id=prog.id,
+    )
+    l3 = model.Lesson(
+        sid="l_3",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=3,
+        instructor_name_1="Inst3",
+        start_at=datetime.datetime(2026, 8, 3, 10, 0),
+        end_at=datetime.datetime(2026, 8, 3, 10, 45),
+        program_id=prog.id,
+    )
+    l4 = model.Lesson(
+        sid="l_4",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=4,
+        instructor_name_1="Inst4",
+        start_at=datetime.datetime(2026, 8, 4, 10, 0),
+        end_at=datetime.datetime(2026, 8, 4, 10, 45),
+        program_id=prog.id,
+    )
+    l5 = model.Lesson(
+        sid="l_5",
+        store_id=1,
+        store_name="銀座",
+        instructor_id_1=5,
+        instructor_name_1="Inst5",
+        start_at=datetime.datetime(2026, 8, 5, 10, 0),
+        end_at=datetime.datetime(2026, 8, 5, 10, 45),
+        program_id=prog.id,
+    )
+    l_exclude = model.Lesson(
+        sid="l_exc",
+        store_id=1,
+        store_name="新宿",
+        instructor_id_1=6,
+        instructor_name_1="InstExclude",
+        start_at=datetime.datetime(2026, 8, 6, 10, 0),
+        end_at=datetime.datetime(2026, 8, 6, 10, 45),
+        program_id=prog.id,
+    )
+    session.add_all([l1, l2, l3, l4, l5, l_exclude])
+    session.flush()
+
+    h1 = model.LessonHistory(
+        web_account_id=web_account.id,
+        lesson_sid=l1.sid,
+        bike_number="1",
+        ticket_type="マンスリー",
+        is_absent=False,
+    )
+    h2 = model.LessonHistory(
+        web_account_id=web_account.id,
+        lesson_sid=l2.sid,
+        bike_number="2",
+        ticket_type=None,
+        is_absent=False,
+    )
+    h3 = model.LessonHistory(
+        web_account_id=web_account.id,
+        lesson_sid=l3.sid,
+        bike_number="0",
+        ticket_type="マンスリー",
+        is_absent=False,
+    )
+    h4 = model.LessonHistory(
+        web_account_id=web_account.id,
+        lesson_sid=l4.sid,
+        bike_number="3",
+        ticket_type="",
+        is_absent=False,
+    )
+    h5 = model.LessonHistory(
+        web_account_id=web_account.id,
+        lesson_sid=l5.sid,
+        bike_number="0",
+        ticket_type=None,
+        is_absent=False,
+    )
+    h_exclude = model.LessonHistory(
+        web_account_id=web_account.id,
+        lesson_sid=l_exclude.sid,
+        bike_number="0",
+        ticket_type="",
+        is_absent=False,
+    )
+    session.add_all([h1, h2, h3, h4, h5, h_exclude])
+    session.commit()
+
+    wa_ids = [web_account.id]
+
+    # 1. 表示対象 (get_monthly_histories_from_db)
+    monthly_rows = history.get_monthly_histories_from_db(
+        web_account.id, 2026, 8, session
+    )
+    # 対象5件、除外1件
+    assert len(monthly_rows) == 5
+    insts = [r["インストラクター"] for r in monthly_rows]
+    assert "InstExclude" not in insts
+
+    # 2. 月間サマリー (get_monthly_summary)
+    summary = history.get_monthly_summary(
+        web_account.id, 2026, 8, session, month_history=None
+    )
+    assert summary["monthly_count"] == 5
+    assert summary["total_count"] == 5
+
+    # 3. 期間受講数 (get_total_lesson_count)
+    assert history.get_total_lesson_count(wa_ids, session, year=2026, month=8) == 5
+    assert history.get_total_lesson_count(wa_ids, session, year=2026) == 5
+    assert history.get_total_lesson_count(wa_ids, session) == 5
+
+    # 4. インストラクター集計 (get_instructor_summary)
+    inst_summary = history.get_instructor_summary(wa_ids, session, year=2026, month=8)
+    assert len(inst_summary) == 5
+    inst_names = {r["Instructor"] for r in inst_summary}
+    assert "InstExclude" not in inst_names
+
+    # 5. プログラム集計 (get_program_summary)
+    prog_summary = history.get_program_summary(wa_ids, session, year=2026, month=8)
+    assert len(prog_summary) == 1
+    assert prog_summary[0]["count"] == 5
+
+    # 6. スタジオ集計 (get_studio_summary)
+    studio_summary = history.get_studio_summary(wa_ids, session, year=2026, month=8)
+    assert len(studio_summary) == 1
+    assert studio_summary[0]["Studio"] == "銀座"
+    assert studio_summary[0]["count"] == 5
+
+    # 7. 初回受講日判定 (get_first_lesson_year_month)
+    first_ym = history.get_first_lesson_year_month(None, wa_ids, session)
+    assert first_ym == (2026, 8)

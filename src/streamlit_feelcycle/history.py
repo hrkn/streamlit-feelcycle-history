@@ -358,6 +358,22 @@ DEFAULT_ACCOUNT_ICONS: list[str] = [
 ]
 
 
+def get_valid_lesson_history_filters() -> list[typing.Any]:
+    """集計・表示対象となる有効なLessonHistoryのSQLAlchemyフィルター条件を返す。
+
+    以下の条件の両方を満たすレコードを除外する:
+    - bike_number が "0"
+    - ticket_type が空文字 (null は除外しない)
+    """
+    return [
+        sqlalchemy.or_(
+            model.LessonHistory.bike_number != "0",
+            model.LessonHistory.ticket_type.is_(None),
+            model.LessonHistory.ticket_type != "",
+        ),
+    ]
+
+
 def get_monthly_histories_from_db(
     web_account_id: int | typing.Sequence[int],
     year: int,
@@ -386,6 +402,7 @@ def get_monthly_histories_from_db(
             model.LessonHistory.web_account_id.in_(ids),
             model.Lesson.start_at >= start_date,
             model.Lesson.start_at < end_date,
+            *get_valid_lesson_history_filters(),
         )
         .order_by(model.Lesson.start_at.asc())
     )
@@ -459,6 +476,7 @@ def get_monthly_summary(
     stmt_total = sqlalchemy.select(sqlalchemy.func.count(model.LessonHistory.id)).where(
         model.LessonHistory.web_account_id.in_(ids),
         model.LessonHistory.is_absent.is_(False),
+        *get_valid_lesson_history_filters(),
     )
     db_total_count = session.scalar(stmt_total) or 0
 
@@ -485,6 +503,7 @@ def get_monthly_summary(
             model.LessonHistory.is_absent.is_(False),
             model.Lesson.start_at >= start_date,
             model.Lesson.start_at < end_date,
+            *get_valid_lesson_history_filters(),
         )
     )
     monthly_histories = session.scalars(stmt_month).all()
@@ -549,6 +568,7 @@ def get_first_lesson_year_month(
                     .where(
                         model.LessonHistory.web_account_id.in_(ids),
                         model.LessonHistory.is_absent.is_(False),
+                        *get_valid_lesson_history_filters(),
                     )
                 )
                 min_date = session.scalar(stmt)
@@ -622,6 +642,7 @@ def get_total_lesson_count(
         .where(
             model.LessonHistory.web_account_id.in_(web_account_ids),
             model.LessonHistory.is_absent.is_(False),
+            *get_valid_lesson_history_filters(),
         )
     )
     if year is not None and month is not None:
@@ -661,6 +682,7 @@ def get_instructor_summary(
     filters = [
         model.LessonHistory.web_account_id.in_(web_account_ids),
         model.LessonHistory.is_absent.is_(False),
+        *get_valid_lesson_history_filters(),
     ]
     if year is not None and month is not None:
         start_date = datetime.datetime(year, month, 1, 0, 0, 0)
@@ -753,6 +775,7 @@ def get_program_summary(
         .where(
             model.LessonHistory.web_account_id.in_(web_account_ids),
             model.LessonHistory.is_absent.is_(False),
+            *get_valid_lesson_history_filters(),
         )
         .group_by(
             model.Program.name,
@@ -821,6 +844,7 @@ def get_studio_summary(
         .where(
             model.LessonHistory.web_account_id.in_(web_account_ids),
             model.LessonHistory.is_absent.is_(False),
+            *get_valid_lesson_history_filters(),
         )
         .group_by(model.Lesson.store_name)
         .order_by(sqlalchemy.text("first_visit"))
