@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import unittest.mock
 
@@ -206,3 +207,59 @@ def test_after_cursor_execute_exception_coverage() -> None:
         context=None,
         executemany=False,
     )
+
+
+def test_db_locks_initialization() -> None:
+    # threading.Lock が導入されていることを検証
+    assert isinstance(db._db_init_lock, type(threading.Lock()))
+    assert isinstance(db._app_init_lock, type(threading.Lock()))
+
+
+def test_download_db_thread_safety() -> None:
+    # 複数スレッドから同時に download_db を呼び出しても正常に完了することを検証
+    local_engine = db.get_local_engine()
+    errors = []
+
+    def run_download() -> None:
+        try:
+            db.download_db(local_engine)
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=run_download) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(errors) == 0
+
+
+def test_initialize_app_once_concurrency() -> None:
+    # 複数スレッドから同時に initialize_app_once が呼ばれても排他制御され、1度だけ初期化が実行されることを検証
+    with (
+        unittest.mock.patch(
+            "streamlit_feelcycle.database.download_db"
+        ) as mock_download,
+        unittest.mock.patch(
+            "streamlit_feelcycle.database.start_sync_thread"
+        ) as mock_start,
+    ):
+        db._is_initialized = False
+
+        func_init = getattr(
+            db.initialize_app_once, "__wrapped__", db.initialize_app_once
+        )
+
+        def run_init() -> None:
+            func_init()
+
+        threads = [threading.Thread(target=run_init) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert mock_download.call_count == 1
+        assert mock_start.call_count == 1
+        assert db._is_initialized is True

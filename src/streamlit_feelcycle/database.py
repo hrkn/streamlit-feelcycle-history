@@ -35,6 +35,9 @@ def get_sync_queue() -> queue.Queue:
 
 sync_queue = get_sync_queue()
 _sync_in_progress = threading.local()
+_db_init_lock = threading.Lock()
+_app_init_lock = threading.Lock()
+_is_initialized: bool = False
 
 
 def get_local_engine() -> sqlalchemy.Engine:
@@ -50,77 +53,78 @@ local_engine = get_local_engine()
 
 # 3. データ初期ダウンロードとスキーマ作成
 def download_db(local_eng: sqlalchemy.Engine) -> None:
-    _sync_in_progress.active = True
-    LOGGER.debug("Starting D1 database download via export API...")
-    try:
-        # 直接 D1 export API に POST
-        default_base = (
-            f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}"
-            f"/d1/database/{DATABASE_ID}"
-        )
-        base_url = os.environ.get("CF_D1_BASE_URL", default_base)
-        headers = {
-            "Authorization": f"Bearer {API_TOKEN}",
-            "Content-Type": "application/json",
-        }
-        url = f"{base_url}/export"
-
-        response = requests.post(
-            url, headers=headers, json={"output_format": "file"}, timeout=15.0
-        )
-        response.raise_for_status()
-
-        data = response.json()
-        if not data.get("success", False):
-            errors = data.get("errors", [])
-            err_msg = (
-                errors[0].get("message", "Unknown error")
-                if errors
-                else "Unknown D1 export error"
-            )
-            raise RuntimeError(f"D1 export failed: {err_msg}")
-
-        result = data.get("result", {})
-        sql_content = result.get("sql")
-
-        # signed_urlがあればrequestsでダウンロード
-        signed_url = result.get("signed_url")
-        if signed_url:
-            LOGGER.debug(f"Downloading SQL dump from signed URL: {signed_url}")
-            dl_res = requests.get(signed_url, timeout=30.0)
-            dl_res.raise_for_status()
-            sql_content = dl_res.text
-
-        if not sql_content:
-            raise RuntimeError("D1 export returned empty SQL content")
-
-        LOGGER.debug(
-            "D1 database SQL dump downloaded successfully. Restoring to local SQLite..."
-        )
-
-        # ローカルDBをクリアしてダンプを実行
-        raw_conn = local_eng.raw_connection()
+    with _db_init_lock:
+        _sync_in_progress.active = True
+        LOGGER.debug("Starting D1 database download via export API...")
         try:
-            raw_conn.execute("PRAGMA foreign_keys = OFF;")
-            cursor = raw_conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            # 直接 D1 export API に POST
+            default_base = (
+                f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}"
+                f"/d1/database/{DATABASE_ID}"
             )
-            tables = [row[0] for row in cursor.fetchall()]
-            for table in tables:
-                cursor.execute(f'DROP TABLE IF EXISTS "{table}";')
+            base_url = os.environ.get("CF_D1_BASE_URL", default_base)
+            headers = {
+                "Authorization": f"Bearer {API_TOKEN}",
+                "Content-Type": "application/json",
+            }
+            url = f"{base_url}/export"
 
-            raw_conn.executescript(sql_content)
-            raw_conn.commit()
-            LOGGER.debug("Local SQLite database restored successfully.")
+            response = requests.post(
+                url, headers=headers, json={"output_format": "file"}, timeout=15.0
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            if not data.get("success", False):
+                errors = data.get("errors", [])
+                err_msg = (
+                    errors[0].get("message", "Unknown error")
+                    if errors
+                    else "Unknown D1 export error"
+                )
+                raise RuntimeError(f"D1 export failed: {err_msg}")
+
+            result = data.get("result", {})
+            sql_content = result.get("sql")
+
+            # signed_urlがあればrequestsでダウンロード
+            signed_url = result.get("signed_url")
+            if signed_url:
+                LOGGER.debug(f"Downloading SQL dump from signed URL: {signed_url}")
+                dl_res = requests.get(signed_url, timeout=30.0)
+                dl_res.raise_for_status()
+                sql_content = dl_res.text
+
+            if not sql_content:
+                raise RuntimeError("D1 export returned empty SQL content")
+
+            LOGGER.debug(
+                "D1 database SQL dump downloaded successfully. Restoring to local SQLite..."
+            )
+
+            # ローカルDBをクリアしてダンプを実行
+            raw_conn = local_eng.raw_connection()
+            try:
+                raw_conn.execute("PRAGMA foreign_keys = OFF;")
+                cursor = raw_conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                )
+                tables = [row[0] for row in cursor.fetchall()]
+                for table in tables:
+                    cursor.execute(f'DROP TABLE IF EXISTS "{table}";')
+
+                raw_conn.executescript(sql_content)
+                raw_conn.commit()
+                LOGGER.debug("Local SQLite database restored successfully.")
+            finally:
+                raw_conn.close()
+
+        except Exception as e:
+            LOGGER.error(f"Failed to download/restore D1 database: {e}")
+            raise e
         finally:
-            raw_conn.close()
-
-    except Exception as e:
-        LOGGER.error(f"Failed to download/restore D1 database: {e}")
-        raise e
-    finally:
-        _sync_in_progress.active = False
+            _sync_in_progress.active = False
 
 
 # 4. SQLAlchemy Eventによるフック
@@ -310,5 +314,9 @@ start_sync_thread = st.cache_resource(start_sync_thread)
 
 @st.cache_resource
 def initialize_app_once() -> None:
-    download_db(local_engine)
-    start_sync_thread()
+    global _is_initialized
+    with _app_init_lock:
+        if not _is_initialized:
+            download_db(local_engine)
+            start_sync_thread()
+            _is_initialized = True
