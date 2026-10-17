@@ -30,7 +30,8 @@ def get_d1_engine() -> sqlalchemy.Engine:
 
 @pytest.fixture(autouse=True)
 def mock_env():
-    yield
+    with unittest.mock.patch("streamlit_feelcycle.database.download_db"):
+        yield
     # エンジン接続を破棄
     try:
         get_d1_engine().dispose()
@@ -269,8 +270,7 @@ def test_duplicate_account_registration_blocked() -> None:
         assert any("既に連携済みのアカウントです。" in e.value for e in at.error)
 
 
-def test_unlink_button_behavior() -> None:
-    # ローカルDBにAliceの2つ目のWebアカウントを追加
+def _add_second_account_for_alice() -> int:
     with sqlalchemy.orm.Session(db.get_local_engine()) as session:
         alice_member = session.scalars(
             sqlalchemy.select(model.Member).where(model.Member.name == "Alice")
@@ -283,7 +283,11 @@ def test_unlink_button_behavior() -> None:
         )
         session.add(wa_second)
         session.commit()
-        second_wa_id = wa_second.id
+        return wa_second.id
+
+
+def test_unlink_button_behavior() -> None:
+    second_wa_id = _add_second_account_for_alice()
 
     at = streamlit.testing.v1.AppTest.from_file(MAIN_PY_PATH)
 
@@ -349,3 +353,216 @@ def test_unlink_button_behavior() -> None:
         ]
         assert len(remaining_unlink_btns) == 1
         assert remaining_unlink_btns[0].disabled is True
+
+
+def test_multiple_account_login_flow() -> None:
+    second_wa_id = _add_second_account_for_alice()
+
+    at = streamlit.testing.v1.AppTest.from_file(MAIN_PY_PATH)
+
+    mock_account_instance = unittest.mock.MagicMock()
+    mock_account_instance.login.return_value = True
+    mock_account_instance.get_first_lesson_date.return_value = datetime.datetime(
+        2024, 1, 1, 10, 0
+    )
+    mock_mypage = unittest.mock.MagicMock()
+    mock_mypage.member_name = "Alice"
+    mock_mypage.store = ["RPG"]
+    mock_mypage.member_type = "マンスリー"
+    mock_account_instance.mypage.return_value = mock_mypage
+
+    instructor = feelpycle.api.Instructor(id=101, name="Anna")
+    prog_search = feelpycle.api.ProgramSearch(id=1, name="BB2 MLN 2")
+    inst_search = feelpycle.api.InstructorSearch(id="101", name="Anna")
+    lesson1 = feelpycle.api.LessonInfo(
+        sid="lesson_sid_002",
+        shift_date="2026/09/01",
+        ls_st=datetime.time(10, 0, 0),
+        ls_et=datetime.time(10, 45, 0),
+        store_name="新宿",
+        iname="BB2 MLN 2",
+        instructor_name_list=[instructor],
+        sheet_no=12,
+        ticket_name="マンスリー",
+        program_search=prog_search,
+        genre_search=[],
+        instructor_search=inst_search,
+        playlist_url="",
+        cancel_flg=0,
+        cancel_cancel_flg=0,
+    )
+    mock_month_history = feelpycle.api.MonthHistory(
+        summary_count=5,
+        member_count=1,
+        ticket_count=0,
+        lesson_info=[lesson1],
+    )
+    mock_account_instance.get_lesson_history.return_value = mock_month_history
+
+    with unittest.mock.patch(
+        "feelpycle.api.Account", return_value=mock_account_instance
+    ):
+        at.run(timeout=30)
+        # alice@example.com でログイン
+        at.text_input[0].input("alice@example.com")
+        at.text_input[1].input("password123")
+        at.button[0].click().run(timeout=30)
+
+        assert at.session_state.logged_in
+
+        # ログイン直後の状態確認:
+        # alice@example.com は (ログイン中) バッジあり、alice_sub@example.com はバッジなし
+        account_labels = [m.value for m in at.sidebar.markdown]
+        assert any("alice@example.com** (ログイン中)" in lbl for lbl in account_labels)
+        assert any(
+            "alice_sub@example.com**" in lbl and "(ログイン中)" not in lbl
+            for lbl in account_labels
+        )
+
+        # ログインボタンの確認
+        login_btns = [
+            b for b in at.sidebar.button if b.key and b.key.startswith("login_btn_")
+        ]
+        assert len(login_btns) == 2
+
+        # ログイン中のアカウントのボタンは無効 (disabled=True)
+        main_login_btn = next(b for b in login_btns if b.help == "ログイン中")
+        assert main_login_btn.disabled is True
+
+        # 未ログインアカウント (alice_sub@example.com) のボタンは有効 (disabled=False)
+        sub_login_btn = next(
+            b for b in login_btns if b.key == f"login_btn_{second_wa_id}"
+        )
+        assert sub_login_btn.disabled is False
+        assert sub_login_btn.help == "ログインして履歴を更新"
+
+        # alice_sub@example.com のログインボタンをクリックしてダイアログを開く
+        sub_login_btn.click().run(timeout=30)
+
+        # パスワードを入力して送信
+        new_sub_login_btn = next(
+            b for b in at.sidebar.button if b.key == f"login_btn_{second_wa_id}"
+        )
+        submit_btn = next(b for b in at.button if "ログインして履歴を更新" in b.label)
+        at.text_input[0].input("secret123")
+        new_sub_login_btn.click()
+        submit_btn.click().run(timeout=30)
+
+        # ログイン成功後、alice_sub@example.com にも (ログイン中) が表示されること
+        updated_labels = [m.value for m in at.sidebar.markdown]
+        assert any(
+            "alice_sub@example.com** (ログイン中)" in lbl for lbl in updated_labels
+        )
+
+        # alice_sub@example.com のログインボタンも無効化 (disabled=True) されること
+        updated_login_btns = [
+            b for b in at.sidebar.button if b.key and b.key.startswith("login_btn_")
+        ]
+        sub_login_btn_after = next(
+            b for b in updated_login_btns if b.key == f"login_btn_{second_wa_id}"
+        )
+        assert sub_login_btn_after.disabled is True
+        assert sub_login_btn_after.help == "ログイン中"
+
+        # alice_sub@example.com の解除ボタンも無効化 (disabled=True) されること
+        unlink_btns = [
+            b for b in at.sidebar.button if b.key and b.key.startswith("unlink_btn_")
+        ]
+        sub_unlink_btn = next(
+            b for b in unlink_btns if b.key == f"unlink_btn_{second_wa_id}"
+        )
+        assert sub_unlink_btn.disabled is True
+        assert "ログイン中のため解除できません" in (sub_unlink_btn.help or "")
+
+
+def test_multiple_account_login_empty_password() -> None:
+    second_wa_id = _add_second_account_for_alice()
+
+    at = streamlit.testing.v1.AppTest.from_file(MAIN_PY_PATH)
+
+    mock_account_instance = unittest.mock.MagicMock()
+    mock_account_instance.login.return_value = True
+    mock_account_instance.get_first_lesson_date.return_value = datetime.datetime(
+        2024, 1, 1, 10, 0
+    )
+    mock_mypage = unittest.mock.MagicMock()
+    mock_mypage.member_name = "Alice"
+    mock_mypage.store = ["RPG"]
+    mock_mypage.member_type = "マンスリー"
+    mock_account_instance.mypage.return_value = mock_mypage
+
+    with unittest.mock.patch(
+        "feelpycle.api.Account", return_value=mock_account_instance
+    ):
+        at.run(timeout=30)
+        # alice@example.com でログイン
+        at.text_input[0].input("alice@example.com")
+        at.text_input[1].input("password123")
+        at.button[0].click().run(timeout=30)
+
+        assert at.session_state.logged_in
+
+        # alice_sub@example.com のログインボタンをクリックしてダイアログを開く
+        sub_login_btn = next(
+            b for b in at.sidebar.button if b.key == f"login_btn_{second_wa_id}"
+        )
+        sub_login_btn.click().run(timeout=30)
+
+        # パスワード空で送信してバリデーションエラーを検証
+        new_sub_login_btn = next(
+            b for b in at.sidebar.button if b.key == f"login_btn_{second_wa_id}"
+        )
+        submit_btn = next(b for b in at.button if "ログインして履歴を更新" in b.label)
+        new_sub_login_btn.click()
+        submit_btn.click().run(timeout=30)
+        assert any("パスワードを入力してください。" in e.value for e in at.error)
+
+
+def test_multiple_account_login_invalid_password() -> None:
+    second_wa_id = _add_second_account_for_alice()
+
+    at = streamlit.testing.v1.AppTest.from_file(MAIN_PY_PATH)
+
+    mock_account_instance = unittest.mock.MagicMock()
+    # 初期ログインは成功、2つ目のアカウントログイン時は失敗をシミュレート
+    mock_account_instance.login.side_effect = [True, False]
+    mock_account_instance.get_first_lesson_date.return_value = datetime.datetime(
+        2024, 1, 1, 10, 0
+    )
+    mock_mypage = unittest.mock.MagicMock()
+    mock_mypage.member_name = "Alice"
+    mock_mypage.store = ["RPG"]
+    mock_mypage.member_type = "マンスリー"
+    mock_account_instance.mypage.return_value = mock_mypage
+
+    with unittest.mock.patch(
+        "feelpycle.api.Account", return_value=mock_account_instance
+    ):
+        at.run(timeout=30)
+        # alice@example.com でログイン
+        at.text_input[0].input("alice@example.com")
+        at.text_input[1].input("password123")
+        at.button[0].click().run(timeout=30)
+
+        assert at.session_state.logged_in
+
+        # alice_sub@example.com のログインボタンをクリックしてダイアログを開く
+        sub_login_btn = next(
+            b for b in at.sidebar.button if b.key == f"login_btn_{second_wa_id}"
+        )
+        sub_login_btn.click().run(timeout=30)
+
+        # 誤ったパスワードを入力して送信
+        new_sub_login_btn = next(
+            b for b in at.sidebar.button if b.key == f"login_btn_{second_wa_id}"
+        )
+        submit_btn = next(b for b in at.button if "ログインして履歴を更新" in b.label)
+        at.text_input[0].input("wrong_password")
+        new_sub_login_btn.click()
+        submit_btn.click().run(timeout=30)
+
+        # エラーメッセージの表示を検証
+        assert any(
+            "ログインに失敗しました。パスワードが正しくありません。" in e.value
+            for e in at.error
+        )

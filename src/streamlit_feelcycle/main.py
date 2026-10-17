@@ -153,6 +153,16 @@ if "account" not in st.session_state:
         account.set_session_state(persisted.api_session_state)
     st.session_state.account = account
 
+if "accounts" not in st.session_state:
+    st.session_state.accounts = {}
+
+if (
+    st.session_state.logged_in
+    and st.session_state.email
+    and st.session_state.email not in st.session_state.accounts
+):
+    st.session_state.accounts[st.session_state.email] = st.session_state.account
+
 
 @st.dialog("アカウント追加")
 def show_add_account_dialog(target_member_id: int) -> None:
@@ -242,6 +252,10 @@ def show_add_account_dialog(target_member_id: int) -> None:
             else:
                 st.success("アカウントを追加しました。")
 
+            if "accounts" not in st.session_state:
+                st.session_state.accounts = {}
+            st.session_state.accounts[new_email] = add_account
+
             st.session_state.first_lesson_year = None
             time.sleep(1.0)
             st.rerun()
@@ -249,6 +263,60 @@ def show_add_account_dialog(target_member_id: int) -> None:
             st.error(
                 "ログインに失敗しました。メールアドレスまたはパスワードが正しくありません。"
             )
+
+
+@st.dialog("アカウントログイン")
+def show_login_account_dialog(web_account_id: int, email: str) -> None:
+    st.write(f"**{email}** にログインします。")
+    st.caption("パスワードを入力してログインすると、受講履歴を更新します。")
+
+    with st.form(f"login_account_form_{web_account_id}"):
+        password = st.text_input("パスワード", type="password")
+        submit_button = st.form_submit_button("ログインして履歴を更新")
+
+    if submit_button:
+        if not password:
+            st.error("パスワードを入力してください。")
+            return
+
+        target_account = feelpycle.api.Account()
+        if target_account.login(id=email, password=password):
+            if "accounts" not in st.session_state:
+                st.session_state.accounts = {}
+            st.session_state.accounts[email] = target_account
+
+            progress_bar = st.progress(0.0, text="受講履歴の更新準備中...")
+
+            def update_progress(
+                current: int, total: int, year: int, month: int
+            ) -> None:
+                ratio = min(1.0, max(0.0, current / total))
+                progress_bar.progress(
+                    ratio,
+                    text=f"受講履歴を更新中... ({current}/{total}か月: {year}年{month:02d}月)",
+                )
+
+            with sqlalchemy.orm.Session(database.local_engine) as session:
+                sync_result = history.sync_all_histories(
+                    target_account,
+                    web_account_id,
+                    session,
+                    on_progress=update_progress,
+                )
+            progress_bar.empty()
+
+            st.session_state.first_lesson_ym = None
+            if sync_result["updated"] > 0:
+                st.success(
+                    f"ログインに成功しました。{sync_result['updated']}か月分の履歴を更新しました。"
+                )
+            else:
+                st.success("ログインに成功しました。")
+
+            time.sleep(0.5)
+            st.rerun()
+        else:
+            st.error("ログインに失敗しました。パスワードが正しくありません。")
 
 
 @st.dialog("アカウント連携解除")
@@ -267,7 +335,8 @@ def show_unlink_account_dialog(web_account_id: int, email: str) -> None:
         st.error("連携アカウントが1つのため解除できません。")
         return
 
-    if email == st.session_state.get("email"):
+    logged_in_accounts = st.session_state.get("accounts", {})
+    if email == st.session_state.get("email") or email in logged_in_accounts:
         st.error("ログイン中のアカウントは解除できません。")
         return
 
@@ -354,13 +423,31 @@ with st.sidebar:
 
             st.markdown("---")
             st.subheader("連携アカウント")
+            logged_in_accounts = st.session_state.get("accounts", {})
             for wa in linked_accounts:
                 icon_str = wa.icon if wa.icon else "🚴"
-                is_current_login = wa.email == st.session_state.email
-                badge = " (ログイン中)" if is_current_login else ""
-                col_info, col_edit, col_del = st.columns([3, 1, 1])
+                is_account_logged_in = (
+                    wa.email in logged_in_accounts or wa.email == st.session_state.email
+                )
+                badge = " (ログイン中)" if is_account_logged_in else ""
+                col_info, col_login, col_edit, col_del = st.columns([4, 1, 1, 1])
                 with col_info:
                     st.write(f"{icon_str} **{wa.email}**{badge}")
+                with col_login:
+                    if is_account_logged_in:
+                        st.button(
+                            "🔑",
+                            key=f"login_btn_{wa.id}",
+                            disabled=True,
+                            help="ログイン中",
+                        )
+                    else:
+                        if st.button(
+                            "🔑",
+                            key=f"login_btn_{wa.id}",
+                            help="ログインして履歴を更新",
+                        ):
+                            show_login_account_dialog(wa.id, wa.email)
                 with col_edit:
                     if st.button(
                         "✏️",
@@ -369,8 +456,8 @@ with st.sidebar:
                     ):
                         show_edit_icon_dialog(wa.id, wa.email, wa.icon)
                 with col_del:
-                    can_unlink = len(linked_accounts) > 1 and not is_current_login
-                    if is_current_login:
+                    can_unlink = len(linked_accounts) > 1 and not is_account_logged_in
+                    if is_account_logged_in:
                         unlink_help = "ログイン中のため解除できません"
                     elif len(linked_accounts) <= 1:
                         unlink_help = "連携アカウントが1つのため解除できません"
@@ -397,6 +484,14 @@ with st.sidebar:
             st.session_state.member_id = None
             st.session_state.web_account_id = None
             st.session_state.first_lesson_year = None
+            st.session_state.first_lesson_ym = None
+            if "accounts" in st.session_state:
+                for acc in st.session_state.accounts.values():
+                    try:
+                        acc.logout()
+                    except Exception:
+                        pass
+                st.session_state.accounts = {}
             if "account" in st.session_state:
                 st.session_state.account.logout()
 
@@ -465,6 +560,9 @@ if not st.session_state.logged_in:
                     st.session_state.plan = member_plan
                     st.session_state.web_account_id = web_account_id
                     st.session_state.member_id = member_id
+                    if "accounts" not in st.session_state:
+                        st.session_state.accounts = {}
+                    st.session_state.accounts[email_input] = account
 
                     # 永続化処理を行う
                     persisted.logged_in = True
