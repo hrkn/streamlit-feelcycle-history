@@ -20,6 +20,44 @@ class Default(WorkerEntrypoint):
         is_query = path.endswith("/raw") or path.endswith("/query")
         is_export = path.endswith("/export")
 
+        if not (is_query or is_export):
+            return Response("Not Found", status=404)
+
+        # 認証の検証 (Cloudflare D1 REST API 仕様準拠)
+        auth_header = None
+        if hasattr(request, "headers") and request.headers:
+            auth_header = request.headers.get("Authorization") or request.headers.get(
+                "authorization"
+            )
+
+        is_authenticated = False
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+            expected_token = getattr(env, "API_TOKEN", None)
+            if expected_token:
+                is_authenticated = token == expected_token
+            else:
+                is_authenticated = bool(token)
+
+        if not is_authenticated:
+            error_response = {
+                "result": None,
+                "success": False,
+                "errors": [
+                    {
+                        "code": 10000,
+                        "message": "Authentication error",
+                    }
+                ],
+                "messages": [],
+            }
+            print(f"Error (Unauthorized): {error_response}")
+            return Response(
+                json.dumps(error_response),
+                headers={"Content-Type": "application/json"},
+                status=401,
+            )
+
         if method == "POST" and is_export:
             try:
                 tables_res = await env.DB.prepare(
