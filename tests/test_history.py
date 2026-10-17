@@ -1565,8 +1565,16 @@ def test_unlink_web_account(session: sqlalchemy.orm.Session) -> None:
     session.add_all([upd1, upd2])
     session.commit()
 
-    # wa1 を連携解除
-    history.unlink_web_account(wa1.id, session)
+    # 権限のない会員IDで解除を試みると PermissionError
+    with pytest.raises(PermissionError):
+        history.unlink_web_account(wa1.id, member.id + 999, session)
+
+    # 存在しないアカウントIDで解除を試みると ValueError
+    with pytest.raises(ValueError):
+        history.unlink_web_account(99999, member.id, session)
+
+    # 正しい member_id で wa1 を連携解除
+    history.unlink_web_account(wa1.id, member.id, session)
 
     # wa1 およびその履歴、更新情報が削除されたことを検証
     assert session.get(model.WebAccount, wa1.id) is None
@@ -1601,3 +1609,26 @@ def test_unlink_web_account(session: sqlalchemy.orm.Session) -> None:
         )
     ).all()
     assert len(wa2_updates) == 1
+
+
+def test_update_web_account_icon(session: sqlalchemy.orm.Session) -> None:
+    member = model.Member(name="Test Member")
+    session.add(member)
+    session.flush()
+
+    wa = model.WebAccount(email="user@example.com", member_id=member.id, icon="🚴")
+    session.add(wa)
+    session.commit()
+
+    # 正常系: アイコン更新
+    history.update_web_account_icon(wa.id, member.id, "🐱", session)
+    session.refresh(wa)
+    assert wa.icon == "🐱"
+
+    # 所有権が異なる会員IDの場合は PermissionError
+    with pytest.raises(PermissionError):
+        history.update_web_account_icon(wa.id, member.id + 999, "🐶", session)
+
+    # 存在しないアカウントIDの場合は ValueError
+    with pytest.raises(ValueError):
+        history.update_web_account_icon(99999, member.id, "🐶", session)

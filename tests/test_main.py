@@ -566,3 +566,58 @@ def test_multiple_account_login_invalid_password() -> None:
             "ログインに失敗しました。パスワードが正しくありません。" in e.value
             for e in at.error
         )
+
+
+def test_edit_icon_behavior() -> None:
+    second_wa_id = _add_second_account_for_alice()
+
+    at = streamlit.testing.v1.AppTest.from_file(MAIN_PY_PATH)
+
+    mock_account_instance = unittest.mock.MagicMock()
+    mock_account_instance.login.return_value = True
+    mock_account_instance.get_first_lesson_date.return_value = datetime.datetime(
+        2024, 1, 1, 10, 0
+    )
+    mock_mypage = unittest.mock.MagicMock()
+    mock_mypage.member_name = "Alice"
+    mock_mypage.store = ["RPG"]
+    mock_mypage.member_type = "マンスリー"
+    mock_account_instance.mypage.return_value = mock_mypage
+
+    with unittest.mock.patch(
+        "feelpycle.api.Account", return_value=mock_account_instance
+    ):
+        at.run(timeout=30)
+        # alice@example.com でログイン
+        at.text_input[0].input("alice@example.com")
+        at.text_input[1].input("password123")
+        at.button[0].click().run(timeout=30)
+
+        assert at.session_state.logged_in
+
+        # 編集ボタンをクリックしてダイアログを開く
+        edit_btn = next(
+            b for b in at.sidebar.button if b.key == f"edit_icon_btn_{second_wa_id}"
+        )
+        edit_btn.click().run(timeout=30)
+
+        # アイコンのセレクトボックスが存在し、選択肢から変更
+        select_box = next(
+            s for s in at.selectbox if s.key == f"edit_icon_select_{second_wa_id}"
+        )
+        select_box.select("🐶")
+
+        new_edit_btn = next(
+            b for b in at.sidebar.button if b.key == f"edit_icon_btn_{second_wa_id}"
+        )
+        save_btn = next(
+            b for b in at.button if b.key == f"save_icon_btn_{second_wa_id}"
+        )
+        new_edit_btn.click()
+        save_btn.click().run(timeout=30)
+
+        # DBでアイコンが更新されていることを確認
+        with sqlalchemy.orm.Session(db.get_local_engine()) as session:
+            updated_wa = session.get(model.WebAccount, second_wa_id)
+            assert updated_wa is not None
+            assert updated_wa.icon == "🐶"

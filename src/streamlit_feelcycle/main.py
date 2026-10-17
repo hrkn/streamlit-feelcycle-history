@@ -321,15 +321,24 @@ def show_login_account_dialog(web_account_id: int, email: str) -> None:
 
 @st.dialog("アカウント連携解除")
 def show_unlink_account_dialog(web_account_id: int, email: str) -> None:
-    st.write(f"**{email}** の連携を解除しますか？")
-    st.caption("解除すると、このアカウントに関連する受講履歴データも削除されます。")
-
     current_member_id = st.session_state.get("member_id")
+    if not current_member_id:
+        st.error("ログイン情報が見つかりません。")
+        return
+
     with sqlalchemy.orm.Session(database.local_engine) as session:
+        target_wa = session.get(model.WebAccount, web_account_id)
+        if target_wa is None or target_wa.member_id != current_member_id:
+            st.error("指定されたアカウントの操作権限がありません。")
+            return
+
         stmt = sqlalchemy.select(model.WebAccount).where(
             model.WebAccount.member_id == current_member_id
         )
         linked_count = len(session.scalars(stmt).all())
+
+    st.write(f"**{email}** の連携を解除しますか？")
+    st.caption("解除すると、このアカウントに関連する受講履歴データも削除されます。")
 
     if linked_count <= 1:
         st.error("連携アカウントが1つのため解除できません。")
@@ -345,12 +354,19 @@ def show_unlink_account_dialog(web_account_id: int, email: str) -> None:
         if st.button(
             "解除する", type="primary", key=f"confirm_unlink_{web_account_id}"
         ):
-            with sqlalchemy.orm.Session(database.local_engine) as session:
-                history.unlink_web_account(web_account_id, session)
-            st.session_state.first_lesson_year = None
-            st.success("連携を解除しました。")
-            time.sleep(0.5)
-            st.rerun()
+            try:
+                with sqlalchemy.orm.Session(database.local_engine) as session:
+                    history.unlink_web_account(
+                        web_account_id, current_member_id, session
+                    )
+                st.session_state.first_lesson_year = None
+                st.success("連携を解除しました。")
+                time.sleep(0.5)
+                st.rerun()
+            except PermissionError:
+                st.error("アカウントの連携解除権限がありません。")
+            except ValueError:
+                st.error("対象のアカウントが見つかりません。")
     with col_cancel:
         if st.button("キャンセル", key=f"cancel_unlink_{web_account_id}"):
             st.rerun()
@@ -358,18 +374,24 @@ def show_unlink_account_dialog(web_account_id: int, email: str) -> None:
 
 @st.dialog("アイコン変更")
 def show_edit_icon_dialog(web_account_id: int, email: str, current_icon: str) -> None:
-    st.write(f"**{email}** のアイコンを変更します。")
-
-    # 他の自分のアカウントで使用中のアイコンを除外
     current_member_id = st.session_state.get("member_id")
-    used_by_others: set[str] = set()
-    if current_member_id:
-        with sqlalchemy.orm.Session(database.local_engine) as session:
-            stmt = sqlalchemy.select(model.WebAccount.icon).where(
-                model.WebAccount.member_id == current_member_id,
-                model.WebAccount.id != web_account_id,
-            )
-            used_by_others = set(session.scalars(stmt).all())
+    if not current_member_id:
+        st.error("ログイン情報が見つかりません。")
+        return
+
+    with sqlalchemy.orm.Session(database.local_engine) as session:
+        target_wa = session.get(model.WebAccount, web_account_id)
+        if target_wa is None or target_wa.member_id != current_member_id:
+            st.error("指定されたアカウントの操作権限がありません。")
+            return
+
+        stmt = sqlalchemy.select(model.WebAccount.icon).where(
+            model.WebAccount.member_id == current_member_id,
+            model.WebAccount.id != web_account_id,
+        )
+        used_by_others = set(session.scalars(stmt).all())
+
+    st.write(f"**{email}** のアイコンを変更します。")
 
     available_icons = [
         icon for icon in history.DEFAULT_ACCOUNT_ICONS if icon not in used_by_others
@@ -389,17 +411,18 @@ def show_edit_icon_dialog(web_account_id: int, email: str, current_icon: str) ->
         filter_mode=None,
     )
     if st.button("変更を保存", key=f"save_icon_btn_{web_account_id}"):
-        with sqlalchemy.orm.Session(database.local_engine) as session:
-            stmt = sqlalchemy.select(model.WebAccount).where(
-                model.WebAccount.id == web_account_id
-            )
-            target_wa = session.scalars(stmt).first()
-            if target_wa:
-                target_wa.icon = selected_icon
-                session.commit()
-        st.success("アイコンを変更しました。")
-        time.sleep(0.5)
-        st.rerun()
+        try:
+            with sqlalchemy.orm.Session(database.local_engine) as session:
+                history.update_web_account_icon(
+                    web_account_id, current_member_id, selected_icon, session
+                )
+            st.success("アイコンを変更しました。")
+            time.sleep(0.5)
+            st.rerun()
+        except PermissionError:
+            st.error("アイコンの変更権限がありません。")
+        except ValueError:
+            st.error("対象のアカウントが見つかりません。")
 
 
 # サイドバーにログイン状態を表示

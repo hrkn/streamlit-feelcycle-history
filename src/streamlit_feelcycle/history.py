@@ -881,9 +881,18 @@ def get_studio_summary(
 
 def unlink_web_account(
     web_account_id: int,
+    member_id: int,
     session: sqlalchemy.orm.Session,
 ) -> None:
     """指定されたWebアカウントの連携を解除し、関連データを削除する。"""
+    account = session.get(model.WebAccount, web_account_id)
+    if account is None:
+        raise ValueError(f"WebAccount with id {web_account_id} not found.")
+    if account.member_id != member_id:
+        raise PermissionError(
+            f"WebAccount {web_account_id} does not belong to member {member_id}."
+        )
+
     session.execute(
         sqlalchemy.delete(model.LessonHistory).where(
             model.LessonHistory.web_account_id == web_account_id
@@ -894,7 +903,24 @@ def unlink_web_account(
             model.WebAccountHistoryUpdate.web_account_id == web_account_id
         )
     )
-    session.execute(
-        sqlalchemy.delete(model.WebAccount).where(model.WebAccount.id == web_account_id)
-    )
+    session.delete(account)
+    session.commit()
+
+
+def update_web_account_icon(
+    web_account_id: int,
+    member_id: int,
+    icon: str,
+    session: sqlalchemy.orm.Session,
+) -> None:
+    """指定されたWebアカウントのアイコンを更新する。"""
+    account = session.get(model.WebAccount, web_account_id)
+    if account is None:
+        raise ValueError(f"WebAccount with id {web_account_id} not found.")
+    if account.member_id != member_id:
+        raise PermissionError(
+            f"WebAccount {web_account_id} does not belong to member {member_id}."
+        )
+
+    account.icon = icon
     session.commit()
