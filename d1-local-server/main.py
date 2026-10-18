@@ -1,9 +1,50 @@
 import json
+import math
 import re
+from typing import Any
 import urllib.parse
 
 # pyrefly: ignore [missing-import]
 from workers import Response, WorkerEntrypoint
+
+
+SAFE_IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def quote_identifier(name: str) -> str:
+    """Validate and safely double-quote a SQLite identifier (table or column name)."""
+    if not isinstance(name, str):
+        raise ValueError(f"Identifier must be a string, got {type(name).__name__}")
+    if "\x00" in name:
+        raise ValueError("Identifier contains null bytes")
+    if SAFE_IDENTIFIER_REGEX.match(name):
+        return f'"{name}"'
+    escaped = name.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def format_sql_literal(v: Any) -> str:
+    """Format a Python value into a safe SQLite literal."""
+    if v is None:
+        return "NULL"
+    # In Python, isinstance(True, int) is True, so check bool first
+    if isinstance(v, bool):
+        return "1" if v else "0"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            return "NULL"
+        return repr(v)
+    if isinstance(v, (bytes, bytearray)):
+        return f"X'{bytes(v).hex()}'"
+    if isinstance(v, str):
+        sanitized = v.replace("\x00", "")
+        escaped = sanitized.replace("'", "''")
+        return f"'{escaped}'"
+    sanitized_json = json.dumps(v, ensure_ascii=False).replace("\x00", "")
+    escaped = sanitized_json.replace("'", "''")
+    return f"'{escaped}'"
 
 
 class Default(WorkerEntrypoint):
@@ -73,28 +114,29 @@ class Default(WorkerEntrypoint):
                 for t in tables_raw:
                     table_name = t.get("name")
                     create_sql = t.get("sql")
-                    sql_dump.append(f"{create_sql};")
+                    if not table_name:
+                        continue
+                    if create_sql:
+                        sql_dump.append(f"{create_sql};")
 
-                    data_res = await env.DB.prepare(f"SELECT * FROM {table_name}").all()
+                    quoted_table = quote_identifier(table_name)
+                    data_res = await env.DB.prepare(
+                        f"SELECT * FROM {quoted_table}"
+                    ).all()
                     rows_raw = (
                         data_res.results.to_py()
                         if hasattr(data_res.results, "to_py")
                         else data_res.results
                     )
                     for row in rows_raw:
-                        cols = ", ".join([f'"{k}"' for k in row.keys()])
-                        vals = []
-                        for v in row.values():
-                            if v is None:
-                                vals.append("NULL")
-                            elif isinstance(v, (int, float)):
-                                vals.append(str(v))
-                            else:
-                                escaped = str(v).replace("'", "''")
-                                vals.append(f"'{escaped}'")
-                        vals_str = ", ".join(vals)
+                        quoted_cols = ", ".join(
+                            [quote_identifier(k) for k in row.keys()]
+                        )
+                        vals_str = ", ".join(
+                            [format_sql_literal(v) for v in row.values()]
+                        )
                         sql_dump.append(
-                            f'INSERT INTO "{table_name}" ({cols}) VALUES ({vals_str});'
+                            f"INSERT INTO {quoted_table} ({quoted_cols}) VALUES ({vals_str});"
                         )
 
                 sql_content = "\n".join(sql_dump)
