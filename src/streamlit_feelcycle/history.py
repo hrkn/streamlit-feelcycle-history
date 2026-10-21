@@ -879,6 +879,91 @@ def get_studio_summary(
     ]
 
 
+def get_monthly_history_counts(
+    web_account_ids: list[int],
+    session: sqlalchemy.orm.Session,
+    ascending: bool = True,
+    start_year: typing.Optional[int] = None,
+    start_month: typing.Optional[int] = None,
+    end_year: typing.Optional[int] = None,
+    end_month: typing.Optional[int] = None,
+) -> list[dict[str, typing.Any]]:
+    """月別 (年月) の受講回数合計を集計して返す。
+
+    戻り値は [{"YearMonth": "YYYY/MM", "count": 10}, ...] の形式。
+    start_year と start_month が指定された場合、その開始年月から終了年月
+    (省略時は現在年月) までの全月を対象とし、受講がない月も count: 0 として補完する。
+    ascending が True の場合は年月昇順、False の場合は年月降順でソートする。
+    """
+    if not web_account_ids:
+        return []
+
+    filters = [
+        model.LessonHistory.web_account_id.in_(web_account_ids),
+        model.LessonHistory.is_absent.is_(False),
+        *get_valid_lesson_history_filters(),
+    ]
+    ym_expr = sqlalchemy.func.strftime("%Y/%m", model.Lesson.start_at).label(
+        "year_month"
+    )
+    stmt = (
+        sqlalchemy.select(
+            ym_expr,
+            sqlalchemy.func.count(model.LessonHistory.id).label("count"),
+        )
+        .join(model.LessonHistory, model.LessonHistory.lesson_sid == model.Lesson.sid)
+        .where(*filters)
+        .group_by(ym_expr)
+    )
+    if ascending:
+        stmt = stmt.order_by(ym_expr.asc())
+    else:
+        stmt = stmt.order_by(ym_expr.desc())
+
+    rows = session.execute(stmt).all()
+    count_map = {
+        row.year_month: row.count for row in rows if row.year_month is not None
+    }
+
+    if start_year is not None and start_month is not None:
+        if end_year is None or end_month is None:
+            now = datetime.datetime.now()
+            end_year, end_month = now.year, now.month
+
+        if (start_year, start_month) > (end_year, end_month):
+            start_year, start_month = end_year, end_month
+
+        all_yms: list[str] = []
+        cur_y, cur_m = start_year, start_month
+        while (cur_y, cur_m) <= (end_year, end_month):
+            all_yms.append(f"{cur_y:04d}/{cur_m:02d}")
+            if cur_m == 12:
+                cur_y += 1
+                cur_m = 1
+            else:
+                cur_m += 1
+
+        if not ascending:
+            all_yms.reverse()
+
+        return [
+            {
+                "YearMonth": ym,
+                "count": count_map.get(ym, 0),
+            }
+            for ym in all_yms
+        ]
+
+    return [
+        {
+            "YearMonth": row.year_month,
+            "count": row.count,
+        }
+        for row in rows
+        if row.year_month is not None
+    ]
+
+
 def unlink_web_account(
     web_account_id: int,
     member_id: int,

@@ -847,6 +847,32 @@ else:
                 else:
                     st.info("受講履歴がありません。")
 
+        st.markdown("##### 月別受講回数")
+        if web_account_ids:
+            with sqlalchemy.orm.Session(database.local_engine) as session:
+                monthly_counts = history.get_monthly_history_counts(
+                    web_account_ids,
+                    session,
+                    ascending=True,
+                    start_year=start_year,
+                    start_month=start_month,
+                    end_year=now.year,
+                    end_month=now.month,
+                )
+            if monthly_counts:
+                df_monthly = pandas.DataFrame(monthly_counts)
+                st.dataframe(
+                    df_monthly,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "YearMonth": st.column_config.TextColumn("年月"),
+                        "count": st.column_config.NumberColumn("回数"),
+                    },
+                )
+            else:
+                st.info("受講履歴がありません。")
+
     @st.fragment
     def render_instructor_tab() -> None:
         st.subheader("インストラクター別一覧")

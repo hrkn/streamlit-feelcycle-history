@@ -220,6 +220,9 @@ def test_history_ui_and_sync() -> None:
         # Total: xxx が大きめの文字サイズ (### Total: 1) で表示されていること
         assert any("Total: 1" in m.value for m in at.markdown)
 
+        # 月別受講回数セクションが表示されていること
+        assert any("月別受講回数" in m.value for m in at.markdown)
+
         # ログイン時の自動更新によりサマリー指標 (metric) が表示されること
         metrics = [m.value for m in at.metric]
         assert len(metrics) > 0

@@ -1632,3 +1632,223 @@ def test_update_web_account_icon(session: sqlalchemy.orm.Session) -> None:
     # 存在しないアカウントIDの場合は ValueError
     with pytest.raises(ValueError):
         history.update_web_account_icon(99999, member.id, "🐶", session)
+
+
+def test_get_monthly_history_counts(session: sqlalchemy.orm.Session) -> None:
+    member = model.Member(name="Member For Monthly Counts")
+    session.add(member)
+    session.flush()
+
+    wa1 = model.WebAccount(email="monthly1@example.com", member_id=member.id, icon="")
+    wa2 = model.WebAccount(email="monthly2@example.com", member_id=member.id, icon="")
+    session.add_all([wa1, wa2])
+    session.flush()
+
+    prog = model.Program(name="BB2 Test", background_color="#111", text_color="#eee")
+    session.add(prog)
+    session.flush()
+
+    # レッスンの作成 (2026/08: 1回, 2026/09: 2回, 2026/10: 3回)
+    lessons = [
+        model.Lesson(
+            sid="sid_202608_1",
+            store_id=1,
+            store_name="銀座",
+            instructor_id_1=10,
+            instructor_name_1="Taro",
+            start_at=datetime.datetime(2026, 8, 15, 10, 0),
+            end_at=datetime.datetime(2026, 8, 15, 10, 45),
+            program_id=prog.id,
+        ),
+        model.Lesson(
+            sid="sid_202609_1",
+            store_id=1,
+            store_name="銀座",
+            instructor_id_1=10,
+            instructor_name_1="Taro",
+            start_at=datetime.datetime(2026, 9, 5, 12, 0),
+            end_at=datetime.datetime(2026, 9, 5, 12, 45),
+            program_id=prog.id,
+        ),
+        model.Lesson(
+            sid="sid_202609_2",
+            store_id=1,
+            store_name="銀座",
+            instructor_id_1=10,
+            instructor_name_1="Taro",
+            start_at=datetime.datetime(2026, 9, 20, 18, 0),
+            end_at=datetime.datetime(2026, 9, 20, 18, 45),
+            program_id=prog.id,
+        ),
+        model.Lesson(
+            sid="sid_202610_1",
+            store_id=1,
+            store_name="銀座",
+            instructor_id_1=10,
+            instructor_name_1="Taro",
+            start_at=datetime.datetime(2026, 10, 1, 19, 0),
+            end_at=datetime.datetime(2026, 10, 1, 19, 45),
+            program_id=prog.id,
+        ),
+        model.Lesson(
+            sid="sid_202610_2",
+            store_id=1,
+            store_name="銀座",
+            instructor_id_1=10,
+            instructor_name_1="Taro",
+            start_at=datetime.datetime(2026, 10, 10, 11, 0),
+            end_at=datetime.datetime(2026, 10, 10, 11, 45),
+            program_id=prog.id,
+        ),
+        model.Lesson(
+            sid="sid_202610_3",
+            store_id=1,
+            store_name="銀座",
+            instructor_id_1=10,
+            instructor_name_1="Taro",
+            start_at=datetime.datetime(2026, 10, 25, 14, 0),
+            end_at=datetime.datetime(2026, 10, 25, 14, 45),
+            program_id=prog.id,
+        ),
+    ]
+    session.add_all(lessons)
+    session.flush()
+
+    # wa1の有効な受講履歴 (08月に1回, 09月に2回, 10月に3回)
+    histories_wa1 = [
+        model.LessonHistory(
+            web_account_id=wa1.id,
+            lesson_sid="sid_202608_1",
+            bike_number="1",
+            ticket_type="マンスリー",
+            is_absent=False,
+        ),
+        model.LessonHistory(
+            web_account_id=wa1.id,
+            lesson_sid="sid_202609_1",
+            bike_number="2",
+            ticket_type="マンスリー",
+            is_absent=False,
+        ),
+        model.LessonHistory(
+            web_account_id=wa1.id,
+            lesson_sid="sid_202609_2",
+            bike_number="3",
+            ticket_type="マンスリー",
+            is_absent=False,
+        ),
+        model.LessonHistory(
+            web_account_id=wa1.id,
+            lesson_sid="sid_202610_1",
+            bike_number="4",
+            ticket_type="マンスリー",
+            is_absent=False,
+        ),
+        model.LessonHistory(
+            web_account_id=wa1.id,
+            lesson_sid="sid_202610_2",
+            bike_number="5",
+            ticket_type="マンスリー",
+            is_absent=False,
+        ),
+        model.LessonHistory(
+            web_account_id=wa1.id,
+            lesson_sid="sid_202610_3",
+            bike_number="6",
+            ticket_type="マンスリー",
+            is_absent=False,
+        ),
+    ]
+    session.add_all(histories_wa1)
+
+    # 無効レコード (is_absent=True, または bike_number="0" かつ ticket_type="")
+    invalid_histories = [
+        model.LessonHistory(
+            web_account_id=wa1.id,
+            lesson_sid="sid_202608_1",
+            bike_number="99",
+            ticket_type="マンスリー",
+            is_absent=True,
+        ),
+        model.LessonHistory(
+            web_account_id=wa1.id,
+            lesson_sid="sid_202609_1",
+            bike_number="0",
+            ticket_type="",
+            is_absent=False,
+        ),
+    ]
+    session.add_all(invalid_histories)
+
+    # wa2の受講履歴 (別アカウント)
+    wa2_history = model.LessonHistory(
+        web_account_id=wa2.id,
+        lesson_sid="sid_202608_1",
+        bike_number="10",
+        ticket_type="マンスリー",
+        is_absent=False,
+    )
+    session.add(wa2_history)
+    session.commit()
+
+    # 昇順ソートの検証 (デフォルト: ascending=True)
+    res_asc = history.get_monthly_history_counts([wa1.id], session, ascending=True)
+    assert len(res_asc) == 3
+    assert res_asc[0] == {"YearMonth": "2026/08", "count": 1}
+    assert res_asc[1] == {"YearMonth": "2026/09", "count": 2}
+    assert res_asc[2] == {"YearMonth": "2026/10", "count": 3}
+
+    # 降順ソートの検証 (ascending=False)
+    res_desc = history.get_monthly_history_counts([wa1.id], session, ascending=False)
+    assert len(res_desc) == 3
+    assert res_desc[0] == {"YearMonth": "2026/10", "count": 3}
+    assert res_desc[1] == {"YearMonth": "2026/09", "count": 2}
+    assert res_desc[2] == {"YearMonth": "2026/08", "count": 1}
+
+    # 複数アカウント指定の検証
+    res_multi = history.get_monthly_history_counts(
+        [wa1.id, wa2.id], session, ascending=True
+    )
+    assert len(res_multi) == 3
+    assert res_multi[0] == {"YearMonth": "2026/08", "count": 2}
+
+    # 履歴がない場合
+    res_empty = history.get_monthly_history_counts([99999], session)
+    assert res_empty == []
+
+    # アカウントIDリストが空の場合
+    assert history.get_monthly_history_counts([], session) == []
+
+    # 受講のない月を 0 で補完するテスト (2026/07〜2026/11)
+    res_filled = history.get_monthly_history_counts(
+        [wa1.id],
+        session,
+        ascending=True,
+        start_year=2026,
+        start_month=7,
+        end_year=2026,
+        end_month=11,
+    )
+    assert len(res_filled) == 5
+    assert res_filled[0] == {"YearMonth": "2026/07", "count": 0}
+    assert res_filled[1] == {"YearMonth": "2026/08", "count": 1}
+    assert res_filled[2] == {"YearMonth": "2026/09", "count": 2}
+    assert res_filled[3] == {"YearMonth": "2026/10", "count": 3}
+    assert res_filled[4] == {"YearMonth": "2026/11", "count": 0}
+
+    # 降順かつ 0 補完のテスト
+    res_filled_desc = history.get_monthly_history_counts(
+        [wa1.id],
+        session,
+        ascending=False,
+        start_year=2026,
+        start_month=7,
+        end_year=2026,
+        end_month=11,
+    )
+    assert len(res_filled_desc) == 5
+    assert res_filled_desc[0] == {"YearMonth": "2026/11", "count": 0}
+    assert res_filled_desc[1] == {"YearMonth": "2026/10", "count": 3}
+    assert res_filled_desc[2] == {"YearMonth": "2026/09", "count": 2}
+    assert res_filled_desc[3] == {"YearMonth": "2026/08", "count": 1}
+    assert res_filled_desc[4] == {"YearMonth": "2026/07", "count": 0}
