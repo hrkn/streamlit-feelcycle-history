@@ -14,6 +14,7 @@ import streamlit.runtime.scriptrunner
 import streamlit_persist_session
 
 import streamlit_feelcycle.database as database
+import streamlit_feelcycle.encrypted_logger as encrypted_logger
 import streamlit_feelcycle.history as history
 import streamlit_feelcycle.model as model
 
@@ -100,11 +101,17 @@ if "pytest" not in sys.modules:
         st.info("セッション情報を読み込んでいます...")
         st.stop()
 
+_LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname).4s] %(name)s: %(message)s"
+_LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S"
+
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s.%(msecs)03d [%(levelname).4s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
+    format=_LOG_FORMAT,
+    datefmt=_LOG_DATEFMT,
     handlers=[logging.StreamHandler()],
+)
+encrypted_logger.setup_encrypted_file_logging(
+    formatter=logging.Formatter(fmt=_LOG_FORMAT, datefmt=_LOG_DATEFMT)
 )
 LOGGER = logging.getLogger(__name__)
 

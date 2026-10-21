@@ -1,12 +1,11 @@
 import json
 import math
 import re
-from typing import Any
 import urllib.parse
+from typing import Any
 
 # pyrefly: ignore [missing-import]
 from workers import Response, WorkerEntrypoint
-
 
 SAFE_IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 

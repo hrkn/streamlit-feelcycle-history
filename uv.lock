@@ -1310,6 +1310,7 @@ name = "streamlit-feelcycle-history"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "feelpycle" },
     { name = "python-dotenv" },
     { name = "requests" },
@@ -1328,6 +1329,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=50.0.2" },
     { name = "feelpycle", path = "packages/feelpycle-0.1.0-py3-none-any.whl" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "requests", specifier = ">=2.34.2" },
